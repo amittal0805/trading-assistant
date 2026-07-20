@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: trading-assistant
+    runtime: node
+    plan: free # upgrade to "starter" if you want a persistent disk for snapshots
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: APP_PASSWORD
+        sync: false # set this in the Render dashboard — protects the whole app
+      # Uncomment when using a persistent disk (paid plans):
+      # - key: SNAPSHOT_DIR
+      #   value: /var/data
+    # disk: # requires starter plan or higher — keeps snapshots across deploys
+    #   name: snapshots
+    #   mountPath: /var/data
+    #   sizeGB: 1
