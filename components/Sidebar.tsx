@@ -64,23 +64,28 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-50 flex justify-around border-t border-border bg-surface/95 backdrop-blur py-2">
-        {nav.slice(0, 5).map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] ${
-                active ? "text-accent" : "text-zinc-500"
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              {label.split(" ")[0]}
-            </Link>
-          );
-        })}
+      {/* Mobile bottom nav — scrollable, safe-area aware (iPhone home bar) */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-50 border-t border-border bg-surface/95 backdrop-blur"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <div className="flex overflow-x-auto py-2 px-1" style={{ WebkitOverflowScrolling: "touch" }}>
+          {nav.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] shrink-0 min-w-[64px] ${
+                  active ? "text-accent" : "text-zinc-500"
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                {label.split(" ")[0]}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
     </>
   );
