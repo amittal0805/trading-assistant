@@ -47,6 +47,12 @@ export interface JournalEntry {
   learning: string;
 }
 
+export interface WatchItem {
+  id: string;
+  symbol: string;
+  exchange: Exchange;
+}
+
 export interface Settings {
   capitalINR: number;
   capitalUSD: number;
@@ -58,7 +64,10 @@ interface Store {
   holdings: Holding[];
   positions: Position[];
   journal: JournalEntry[];
+  watchlist: WatchItem[];
   settings: Settings;
+  addWatch: (w: Omit<WatchItem, "id">) => void;
+  removeWatch: (id: string) => void;
   addHolding: (h: Omit<Holding, "id">) => void;
   importHoldings: (rows: Omit<Holding, "id">[]) => void;
   updateHolding: (id: string, patch: Partial<Holding>) => void;
@@ -82,7 +91,16 @@ export const useStore = create<Store>()(
       holdings: [],
       positions: [],
       journal: [],
+      watchlist: [],
       settings: { capitalINR: 200000, capitalUSD: 2000, maxDailyLossPct: 2, defaultBroker: "zerodha" },
+
+      addWatch: (w) =>
+        set((s) =>
+          s.watchlist.some((x) => x.symbol === w.symbol && x.exchange === w.exchange)
+            ? s
+            : { watchlist: [...s.watchlist, { ...w, id: uid() }] }
+        ),
+      removeWatch: (id) => set((s) => ({ watchlist: s.watchlist.filter((w) => w.id !== id) })),
 
       addHolding: (h) => set((s) => ({ holdings: [...s.holdings, { ...h, id: uid() }] })),
       importHoldings: (rows) =>

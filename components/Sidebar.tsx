@@ -14,6 +14,9 @@ import {
   CandlestickChart,
   PieChart,
   TrendingUp,
+  Eye,
+  ClipboardList,
+  Landmark,
 } from "lucide-react";
 
 const nav = [
@@ -23,10 +26,13 @@ const nav = [
   { href: "/holdings", label: "Holdings", icon: Briefcase },
   { href: "/averaging", label: "Dip Buying", icon: TrendingDown },
   { href: "/scalping", label: "Scalping", icon: Scissors },
+  { href: "/watchlist", label: "Watchlist", icon: Eye },
+  { href: "/review", label: "Review", icon: ClipboardList },
   { href: "/sectors", label: "Sectors", icon: PieChart },
   { href: "/trends", label: "Trends", icon: TrendingUp },
   { href: "/brokerage", label: "Brokerage", icon: Receipt },
   { href: "/journal", label: "Journal", icon: BookOpen },
+  { href: "/tax", label: "Tax", icon: Landmark },
 ];
 
 export default function Sidebar() {

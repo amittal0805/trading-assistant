@@ -22,6 +22,7 @@ export default function Holdings() {
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const [market, setMarket] = useState<"IN" | "US">("IN");
 
   const [symbol, setSymbol] = useState("");
   const [exchange, setExchange] = useState<Exchange>("NSE");
@@ -29,6 +30,8 @@ export default function Holdings() {
   const [avg, setAvg] = useState<number | "">("");
   const [cur, setCur] = useState<number | "">("");
   const [type, setType] = useState<"longterm" | "swing">("longterm");
+
+  const inTab = (h: Holding) => (market === "IN") === (currencyFor(h.exchange) === "INR");
 
   const sorted = useMemo(() => {
     const metric = (h: Holding): number | string => {
@@ -47,12 +50,13 @@ export default function Holdings() {
         case "dayPct": return h.prevClose ? (h.currentPrice - h.prevClose) / h.prevClose : -Infinity;
       }
     };
-    return [...holdings].sort((a, b) => {
+    return holdings.filter(inTab).sort((a, b) => {
       const ma = metric(a), mb = metric(b);
       const cmp = typeof ma === "string" ? ma.localeCompare(mb as string) : ma - (mb as number);
       return cmp * sortDir;
     });
-  }, [holdings, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdings, sortKey, sortDir, market]);
 
   if (!mounted) return null;
 
@@ -71,7 +75,41 @@ export default function Holdings() {
     </th>
   );
 
+  const num = (v: unknown) => Number(String(v ?? "").replace(/,/g, ""));
+
+  // Vested Finance holdings export (.xlsx with a "Holdings" sheet).
+  const importVested = async (f: File) => {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(await f.arrayBuffer());
+    const ws = wb.Sheets["Holdings"] ?? wb.Sheets[wb.SheetNames[wb.SheetNames.length - 1]];
+    if (!ws) return 0;
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
+    const parsed = rows
+      .map((r) => {
+        const price = num(r["Current Price (USD)"]);
+        const dailyChg = num(r["Daily Change (USD)"]);
+        return {
+          symbol: String(r["Ticker"] ?? "").toUpperCase(),
+          qty: num(r["Total Shares Held"]),
+          avgPrice: num(r["Average Cost (USD)"]),
+          currentPrice: price,
+          prevClose: isFinite(price) && isFinite(dailyChg) ? price - dailyChg : undefined,
+          exchange: "NASDAQ" as const,
+          broker: "vested" as const,
+          type: "longterm" as const,
+        };
+      })
+      .filter((r) => r.symbol && isFinite(r.qty) && r.qty > 0 && isFinite(r.avgPrice) && r.avgPrice > 0);
+    if (parsed.length > 0) importHoldings(parsed);
+    return parsed.length;
+  };
+
   const onImportFile = async (f: File) => {
+    if (f.name.toLowerCase().endsWith(".xlsx")) {
+      const n = await importVested(f);
+      setImportMsg(n > 0 ? `Imported ${n} US holdings from Vested` : "No holdings found — is this a Vested export?");
+      return;
+    }
     const rows = parseKiteRows(await f.text());
     if (rows.length === 0) {
       setImportMsg("No valid rows found — is this a Kite holdings CSV?");
@@ -128,7 +166,7 @@ export default function Holdings() {
             <input
               ref={fileRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -137,7 +175,7 @@ export default function Holdings() {
               }}
             />
             <button className="btn-ghost !py-1.5 text-xs" onClick={() => fileRef.current?.click()}>
-              <Upload className="w-3.5 h-3.5" /> Import Kite CSV
+              <Upload className="w-3.5 h-3.5" /> Import Kite CSV / Vested XLSX
             </button>
             <button className="btn-ghost !py-1.5 text-xs" onClick={refreshPrices} disabled={refreshing}>
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
@@ -150,14 +188,49 @@ export default function Holdings() {
         </div>
       </div>
 
+      <div className="flex items-center gap-2 mb-4">
+        {(
+          [
+            ["IN", "India (NSE/BSE)"],
+            ["US", "US (NYSE/NASDAQ)"],
+          ] as const
+        ).map(([id, label]) => {
+          const count = holdings.filter((h) => (id === "IN") === (currencyFor(h.exchange) === "INR")).length;
+          return (
+            <button
+              key={id}
+              onClick={() => {
+                setMarket(id);
+                setExchange(id === "IN" ? "NSE" : "NASDAQ");
+              }}
+              className={`btn !py-1.5 text-xs ${
+                market === id
+                  ? "bg-accent/15 text-accent border border-accent/40"
+                  : "bg-surface border border-border text-zinc-400"
+              }`}
+            >
+              {label} <span className="opacity-60 ml-1">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="card mb-6">
         <div className="grid grid-cols-2 md:grid-cols-7 gap-3 items-end">
           <Field label="Stock">
-            <input className="input" value={symbol} placeholder="TCS" onChange={(e) => setSymbol(e.target.value)} />
+            <input className="input" value={symbol} placeholder={market === "IN" ? "TCS" : "AAPL"} onChange={(e) => setSymbol(e.target.value)} />
           </Field>
           <Field label="Exchange">
             <select className="input" value={exchange} onChange={(e) => setExchange(e.target.value as Exchange)}>
-              <option>NSE</option><option>BSE</option><option>NYSE</option><option>NASDAQ</option>
+              {market === "IN" ? (
+                <>
+                  <option>NSE</option><option>BSE</option>
+                </>
+              ) : (
+                <>
+                  <option>NASDAQ</option><option>NYSE</option>
+                </>
+              )}
             </select>
           </Field>
           <Field label="Quantity"><NumInput value={qty} onChange={setQty} placeholder="120" /></Field>
@@ -173,8 +246,14 @@ export default function Holdings() {
         </div>
       </div>
 
-      {holdings.length === 0 ? (
-        <Empty text="No holdings yet. Add one above or import your Kite CSV." />
+      {sorted.length === 0 ? (
+        <Empty
+          text={
+            market === "IN"
+              ? "No Indian holdings yet — add one above or import your Kite CSV."
+              : "No US holdings yet — add one above or import your Vested XLSX."
+          }
+        />
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full min-w-[720px]">
@@ -235,6 +314,31 @@ export default function Holdings() {
                 );
               })}
             </tbody>
+            <tfoot>
+              {(() => {
+                const ccy = market === "IN" ? ("INR" as const) : ("USD" as const);
+                const inv = sorted.reduce((a, h) => a + h.qty * h.avgPrice, 0);
+                const val = sorted.reduce((a, h) => a + h.qty * h.currentPrice, 0);
+                const day = sorted.reduce(
+                  (a, h) => a + (h.prevClose ? (h.currentPrice - h.prevClose) * h.qty : 0),
+                  0
+                );
+                return (
+                  <tr className="bg-surface/60">
+                    <td className="td font-medium" colSpan={5}>Total ({sorted.length})</td>
+                    <td className="td font-mono font-semibold">{fmtMoney(inv, ccy)}</td>
+                    <td className="td font-mono font-semibold">{fmtMoney(val, ccy)}</td>
+                    <td className={`td font-mono font-semibold ${pnlClass(val - inv)}`}>{fmtMoney(val - inv, ccy)}</td>
+                    <td className={`td font-mono text-xs ${pnlClass(val - inv)}`}>
+                      {fmtPct(inv > 0 ? ((val - inv) / inv) * 100 : 0)}
+                    </td>
+                    <td className={`td font-mono text-xs ${pnlClass(day)}`} colSpan={3}>
+                      Day: {fmtMoney(day, ccy)}
+                    </td>
+                  </tr>
+                );
+              })()}
+            </tfoot>
           </table>
         </div>
       )}

@@ -4,3 +4,5 @@ out/
 .env*
 data/
 holdings.csv
+Vested_Holdings*.xlsx
+tsconfig.tsbuildinfo

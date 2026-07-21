@@ -136,44 +136,111 @@ export function averagingPlan(opts: {
   };
 }
 
-/** Partial profit booking from an existing holding. */
+/**
+ * Intraday scalp on top of an existing holding.
+ *
+ * You sell `sellQty` shares high and buy the same quantity back lower the SAME
+ * day. Because the net position returns to where it started, the core holding
+ * (quantity AND average) is untouched — the round trip is booked as intraday
+ * P/L equal to the sell-minus-buyback spread, less charges.
+ *
+ * `buyBackPrice` is optional: pass it once you know (or plan) the re-entry
+ * price. Until then, the plan shows breakeven and target buy-back levels.
+ */
 export function scalpPlan(opts: {
   totalQty: number;
   avgPrice: number;
-  currentPrice: number;
+  sellPrice: number;
   sellQty: number;
+  buyBackPrice?: number | null;
   broker: Broker;
   exchange: Exchange;
 }) {
-  const { totalQty, avgPrice, currentPrice, sellQty, broker, exchange } = opts;
-  if (sellQty <= 0 || sellQty > totalQty) return null;
+  const { totalQty, avgPrice, sellPrice, sellQty, buyBackPrice, broker, exchange } = opts;
+  if (sellQty <= 0 || sellQty > totalQty || sellPrice <= 0 || avgPrice <= 0) return null;
 
-  const res = netPnl(
-    { buyPrice: avgPrice, sellPrice: currentPrice, qty: sellQty, exchange, segment: "delivery" },
-    broker
-  );
-  const remainingQty = totalQty - sellQty;
-  // Cost basis of remaining shares is unchanged (avg stays the same); but net
-  // effective average falls if you treat booked profit as cost reduction:
-  const effectiveAvg = remainingQty > 0 ? (avgPrice * totalQty - currentPrice * sellQty) / remainingQty : 0;
+  const sellValue = sellPrice * sellQty;
 
-  const buyBackLevels = [2, 3, 5].map((dropPct) => {
-    const price = currentPrice * (1 - dropPct / 100);
-    const reQty = sellQty;
-    const newQty = remainingQty + reQty;
-    const newAvg = (remainingQty * avgPrice + reQty * price) / newQty;
-    return { dropPct, price, reQty, newQty, newAvg };
+  // Core holding is unchanged by a completed round trip.
+  const coreQty = totalQty;
+  const coreAvg = avgPrice;
+
+  // Breakeven buy-back: highest price you can re-buy at and still net >= 0 after
+  // the intraday round-trip charges. Charges depend on the buy price, so iterate.
+  let breakevenBuy = sellPrice;
+  for (let i = 0; i < 30; i++) {
+    const charges = roundTripCharges(
+      { buyPrice: breakevenBuy, sellPrice, qty: sellQty, exchange, segment: "intraday" },
+      broker
+    );
+    const next = sellPrice - charges.total / sellQty;
+    if (Math.abs(next - breakevenBuy) < 1e-6) {
+      breakevenBuy = next;
+      break;
+    }
+    breakevenBuy = next;
+  }
+
+  // Target buy-back prices to net a given profit (charges included, iterated).
+  const buyBackForNet = (targetNet: number) => {
+    let price = sellPrice - targetNet / sellQty;
+    for (let i = 0; i < 30; i++) {
+      const charges = roundTripCharges(
+        { buyPrice: price, sellPrice, qty: sellQty, exchange, segment: "intraday" },
+        broker
+      );
+      const next = sellPrice - (targetNet + charges.total) / sellQty;
+      if (Math.abs(next - price) < 1e-6) {
+        price = next;
+        break;
+      }
+      price = next;
+    }
+    return price;
+  };
+
+  // Ladder of buy-backs at small drops below the sell price → profit at each.
+  const buyBackLevels = [0.25, 0.5, 1, 1.5, 2].map((dropPct) => {
+    const price = sellPrice * (1 - dropPct / 100);
+    const r = netPnl({ buyPrice: price, sellPrice, qty: sellQty, exchange, segment: "intraday" }, broker);
+    return { dropPct, price, gross: r.gross, charges: r.charges.total, net: r.net };
   });
 
+  // If a buy-back price is supplied, compute the realised round-trip result.
+  let executed: {
+    buyBackPrice: number;
+    buyBackValue: number;
+    grossProfit: number;
+    charges: ReturnType<typeof netPnl>["charges"];
+    netProfit: number;
+    spreadPct: number;
+    effectiveAvg: number; // core avg notionally reduced by booked profit across the position
+  } | null = null;
+
+  if (buyBackPrice && buyBackPrice > 0) {
+    const r = netPnl(
+      { buyPrice: buyBackPrice, sellPrice, qty: sellQty, exchange, segment: "intraday" },
+      broker
+    );
+    executed = {
+      buyBackPrice,
+      buyBackValue: buyBackPrice * sellQty,
+      grossProfit: r.gross,
+      charges: r.charges,
+      netProfit: r.net,
+      spreadPct: ((sellPrice - buyBackPrice) / sellPrice) * 100,
+      effectiveAvg: coreQty > 0 ? coreAvg - r.net / coreQty : coreAvg,
+    };
+  }
+
   return {
-    grossProfit: res.gross,
-    charges: res.charges,
-    netProfit: res.net,
-    remainingQty,
-    avgUnchanged: avgPrice,
-    effectiveAvg: Math.max(effectiveAvg, 0),
-    nextTargets: [1, 2, 3].map((p) => currentPrice * (1 + p / 100)),
+    coreQty,
+    coreAvg,
+    sellValue,
+    breakevenBuy,
+    targets: [250, 500, 1000].map((net) => ({ net, price: buyBackForNet(net) })),
     buyBackLevels,
+    executed,
   };
 }
 

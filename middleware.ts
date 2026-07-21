@@ -6,6 +6,14 @@ export function middleware(req: NextRequest) {
   const password = process.env.APP_PASSWORD;
   if (!password) return NextResponse.next();
 
+  // Allow external cron schedulers to trigger the EOD snapshot with ?key=
+  if (
+    req.nextUrl.pathname === "/api/eod" &&
+    req.nextUrl.searchParams.get("key") === password
+  ) {
+    return NextResponse.next();
+  }
+
   const user = process.env.APP_USER ?? "trader";
   const expected = `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`;
 

@@ -37,6 +37,30 @@ export default function Journal() {
     };
   }, [journal]);
 
+  const breakdowns = useMemo(() => {
+    if (journal.length < 3) return null;
+    const group = (key: (j: (typeof journal)[number]) => string) => {
+      const map = new Map<string, { n: number; wins: number; pnl: number }>();
+      journal.forEach((j) => {
+        const k = key(j) || "—";
+        const g = map.get(k) ?? { n: 0, wins: 0, pnl: 0 };
+        g.n++;
+        if (j.outcome > 0) g.wins++;
+        g.pnl += j.outcome;
+        map.set(k, g);
+      });
+      return Array.from(map.entries())
+        .map(([label, g]) => ({ label, ...g, winRate: (g.wins / g.n) * 100 }))
+        .sort((a, b) => b.n - a.n);
+    };
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return {
+      byEmotion: group((j) => j.emotion),
+      bySymbol: group((j) => j.symbol).slice(0, 8),
+      byDay: group((j) => days[new Date(j.date).getDay()] ?? "—"),
+    };
+  }, [journal]);
+
   if (!mounted) return null;
 
   const submit = () => {
@@ -62,6 +86,39 @@ export default function Journal() {
           <StatCard label="Avg Win" value={fmtMoney(stats.avgWin)} pnl={1} />
           <StatCard label="Avg Loss" value={fmtMoney(stats.avgLoss)} pnl={-1} />
           <StatCard label="Total P/L" value={fmtMoney(stats.totalPnl)} pnl={stats.totalPnl} />
+        </div>
+      )}
+
+      {breakdowns && (
+        <div className="grid md:grid-cols-3 gap-4 mb-6">
+          {(
+            [
+              ["By Emotion", breakdowns.byEmotion],
+              ["By Stock (top 8)", breakdowns.bySymbol],
+              ["By Day of Week", breakdowns.byDay],
+            ] as const
+          ).map(([title, rows]) => (
+            <div key={title} className="card p-0 overflow-hidden">
+              <h3 className="text-xs font-medium text-zinc-300 px-3 pt-3 pb-1">{title}</h3>
+              <table className="w-full">
+                <thead>
+                  <tr><th className="th">Group</th><th className="th">Trades</th><th className="th">Win %</th><th className="th">P/L</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.label}>
+                      <td className="td text-xs">{r.label}</td>
+                      <td className="td font-mono text-xs">{r.n}</td>
+                      <td className={`td font-mono text-xs ${r.winRate >= 50 ? "text-gain" : "text-loss"}`}>
+                        {r.winRate.toFixed(0)}%
+                      </td>
+                      <td className={`td font-mono text-xs ${pnlClass(r.pnl)}`}>{fmtMoney(r.pnl)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
         </div>
       )}
 

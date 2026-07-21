@@ -21,6 +21,7 @@ interface Snapshot {
   pl: number;
   realizedToday: number;
   chargesToday: number;
+  nifty?: number | null;
 }
 
 function nearestOnOrBefore(snaps: Snapshot[], daysAgo: number): Snapshot | null {
@@ -108,6 +109,43 @@ export default function Trends() {
               </LineChart>
             </ResponsiveContainer>
           </div>
+
+          {(() => {
+            const withBench = snaps.filter((s) => s.value > 0 && s.nifty);
+            if (withBench.length < 2) return null;
+            const base = withBench[0];
+            const data = withBench.map((s) => ({
+              date: s.date,
+              Portfolio: (s.value / base.value) * 100,
+              "Nifty 50": (s.nifty! / base.nifty!) * 100,
+            }));
+            const last = data[data.length - 1];
+            const alpha = last.Portfolio - last["Nifty 50"];
+            return (
+              <div className="card mb-6">
+                <div className="flex items-baseline justify-between mb-4">
+                  <h2 className="text-sm font-medium">Portfolio vs Nifty 50 (indexed to 100 at {base.date})</h2>
+                  <span className={`text-xs font-mono ${alpha >= 0 ? "text-gain" : "text-loss"}`}>
+                    {alpha >= 0 ? "beating" : "trailing"} Nifty by {Math.abs(alpha).toFixed(2)} pts
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={data} margin={{ left: 10, right: 10 }}>
+                    <CartesianGrid stroke="#23232f" strokeDasharray="3 3" />
+                    <XAxis dataKey="date" stroke="#8b8b9e" fontSize={11} />
+                    <YAxis stroke="#8b8b9e" fontSize={11} domain={["auto", "auto"]} width={50}
+                      tickFormatter={(v: number) => v.toFixed(0)} />
+                    <Tooltip
+                      contentStyle={{ background: "#16161f", border: "1px solid #23232f", borderRadius: 8, fontSize: 12 }}
+                      formatter={(v) => Number(v).toFixed(2)}
+                    />
+                    <Line type="monotone" dataKey="Portfolio" stroke="#3b82f6" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="Nifty 50" stroke="#f59e0b" dot={false} strokeWidth={1.5} strokeDasharray="5 3" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
 
           <div className="card p-0 overflow-x-auto">
             <table className="w-full min-w-[640px]">
