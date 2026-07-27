@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { fmtMoney, fmtPct, pnlClass } from "@/lib/format";
 import { PageTitle, Field, NumInput, StatCard, Empty } from "@/components/ui";
+import TradebookIntelligence from "@/components/TradebookIntelligence";
 import { Trash2 } from "lucide-react";
 
 const EMOTIONS = ["Calm", "Confident", "FOMO", "Fear", "Greed", "Revenge", "Impatient", "Disciplined"];
+const TRADE_TYPES = ["Scalp", "Intraday", "Swing", "Delivery"] as const;
 
 export default function Journal() {
   const [mounted, setMounted] = useState(false);
@@ -16,6 +18,7 @@ export default function Journal() {
   const [symbol, setSymbol] = useState("");
   const [reason, setReason] = useState("");
   const [emotion, setEmotion] = useState("Calm");
+  const [tradeType, setTradeType] = useState<(typeof TRADE_TYPES)[number]>("Intraday");
   const [entry, setEntry] = useState<number | "">("");
   const [exit, setExit] = useState<number | "">("");
   const [qty, setQty] = useState<number | "">("");
@@ -55,6 +58,7 @@ export default function Journal() {
     };
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     return {
+      byType: group((j) => j.tradeType ?? "—"),
       byEmotion: group((j) => j.emotion),
       bySymbol: group((j) => j.symbol).slice(0, 8),
       byDay: group((j) => days[new Date(j.date).getDay()] ?? "—"),
@@ -68,7 +72,7 @@ export default function Journal() {
     const out = outcome !== "" ? Number(outcome) : (Number(exit) - Number(entry)) * Number(qty);
     addJournal({
       date: new Date().toISOString().slice(0, 10),
-      symbol: symbol.toUpperCase(), reason, emotion,
+      symbol: symbol.toUpperCase(), reason, emotion, tradeType,
       entry: Number(entry), exit: Number(exit), qty: Number(qty),
       outcome: out, mistakes, learning,
     });
@@ -78,6 +82,8 @@ export default function Journal() {
   return (
     <div>
       <PageTitle title="Trade Journal" subtitle="Every trade logged is a lesson kept" />
+
+      <TradebookIntelligence />
 
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
@@ -90,9 +96,10 @@ export default function Journal() {
       )}
 
       {breakdowns && (
-        <div className="grid md:grid-cols-3 gap-4 mb-6">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {(
             [
+              ["By Trade Type", breakdowns.byType],
               ["By Emotion", breakdowns.byEmotion],
               ["By Stock (top 8)", breakdowns.bySymbol],
               ["By Day of Week", breakdowns.byDay],
@@ -130,6 +137,11 @@ export default function Journal() {
           <Field label="Exit"><NumInput value={exit} onChange={setExit} /></Field>
           <Field label="Quantity"><NumInput value={qty} onChange={setQty} /></Field>
           <Field label="Net Outcome (optional)"><NumInput value={outcome} onChange={setOutcome} placeholder="auto from entry/exit" /></Field>
+          <Field label="Trade Type">
+            <select className="input" value={tradeType} onChange={(e) => setTradeType(e.target.value as (typeof TRADE_TYPES)[number])}>
+              {TRADE_TYPES.map((t) => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
           <Field label="Emotion">
             <select className="input" value={emotion} onChange={(e) => setEmotion(e.target.value)}>
               {EMOTIONS.map((e) => <option key={e}>{e}</option>)}
@@ -155,6 +167,9 @@ export default function Journal() {
                 <span className="text-xs text-muted">{j.date}</span>
                 <span className="text-xs font-mono text-muted">{j.qty} × {j.entry} → {j.exit}</span>
                 <span className={`font-mono text-sm ${pnlClass(j.outcome)}`}>{fmtMoney(j.outcome)}</span>
+                {j.tradeType && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 border border-accent/30 text-accent">{j.tradeType}</span>
+                )}
                 <span className="text-xs px-2 py-0.5 rounded-full bg-surface border border-border text-zinc-400">{j.emotion}</span>
                 <button onClick={() => removeJournal(j.id)} className="ml-auto text-zinc-600 hover:text-loss">
                   <Trash2 className="w-4 h-4" />
