@@ -5,11 +5,18 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { Broker, Exchange } from "./charges";
 import { TradebookResult } from "./tradebook";
 import { SEED_HOLDINGS, SEED_POSITIONS, ownedBySymbol } from "./seedData";
+import { PnlSummary } from "./pnl";
 
 export interface TradebookImport {
   fileName: string;
   importedAt: string;
   result: TradebookResult;
+}
+
+export interface PnlImport {
+  fileName: string;
+  importedAt: string;
+  summary: PnlSummary;
 }
 
 export interface Holding {
@@ -70,7 +77,8 @@ export interface RotationStock {
   name?: string; // display name
   qty: number; // target ("New Qty") after rebalance
   heldQty?: number; // current holding (0 for a fresh buy); Change = qty - heldQty
-  addedPrice?: number; // reference price when added (for P/L)
+  addedPrice?: number; // avg buy / reference price (for P/L)
+  lastPrice?: number; // last known price, fallback when live quotes unavailable
   exchange: Exchange;
 }
 
@@ -99,7 +107,10 @@ interface Store {
   settings: Settings;
   tradebook: TradebookImport | null;
   setTradebook: (t: TradebookImport | null) => void;
+  pnl: PnlImport | null;
+  setPnl: (p: PnlImport | null) => void;
   strategies: Strategy[];
+  restoreBaskets: () => void;
   addStrategy: (name: string, sector?: string) => void;
   updateStrategy: (id: string, patch: Partial<Omit<Strategy, "id" | "stocks">>) => void;
   removeStrategy: (id: string) => void;
@@ -142,10 +153,28 @@ const mkStocks = (rows: Seed[]): RotationStock[] => {
       qty,
       heldQty: o ? o.qty : 0,
       addedPrice: o ? o.avg : fallbackPrice,
+      lastPrice: o ? o.ltp : fallbackPrice,
       exchange: "NSE" as const,
     };
   });
 };
+
+// Self-contained custom-portfolio basket: [symbol, name, shares, avgBuy, currentPrice].
+// Held = shares (the basket's own holding), so P/L matches the broker portfolio
+// exactly regardless of what else you own of that symbol.
+type Portfolio = [string, string, number, number, number];
+
+const mkPortfolio = (rows: Portfolio[]): RotationStock[] =>
+  rows.map(([symbol, name, shares, avg, cur]) => ({
+    id: uid(),
+    symbol,
+    name,
+    qty: shares,
+    heldQty: shares,
+    addedPrice: avg,
+    lastPrice: cur,
+    exchange: "NSE" as const,
+  }));
 
 const seedStrategies = (): Strategy[] => [
   {
@@ -154,16 +183,17 @@ const seedStrategies = (): Strategy[] => [
     sector: "Pharma & Healthcare",
     indexSymbol: "NIFTY PHARMA",
     createdAt: new Date().toISOString(),
-    stocks: mkStocks([
-      ["VIJAYA", "Vijaya Diagnostic Centre Ltd", 9, 1313.9],
-      ["THYROCARE", "Thyrocare Technologies Ltd", 20, 564.25],
-      ["METROPOLIS", "Metropolis Healthcare Ltd", 20, 570.25],
-      ["SAILIFE", "Sai Life Sciences Ltd", 9, 1232.9],
-      ["LAURUSLABS", "Laurus Labs Ltd", 7, 1601.2],
-      ["IOLCP", "IOL Chemicals and Pharmaceuticals Ltd", 76, 149.22],
-      ["EMCURE", "Emcure Pharmaceuticals Ltd", 6, 1881.0],
-      ["JLHL", "Jupiter Life Line Hospitals Ltd", 35, 323.2],
-      ["ASTERDM", "Aster DM Quality Care Ltd", 14, 785.65],
+    // Custom portfolio snapshot (27-Jul-2026): [symbol, name, shares, avgBuy, current].
+    stocks: mkPortfolio([
+      ["VIJAYA", "Vijaya Diagnostic Centre Ltd", 4, 1336.5, 1350.8],
+      ["THYROCARE", "Thyrocare Technologies Ltd", 9, 592.0, 584.04],
+      ["METROPOLIS", "Metropolis Healthcare Ltd", 9, 586.85, 577.35],
+      ["SAILIFE", "Sai Life Sciences Ltd", 4, 1247.4, 1287.0],
+      ["LAURUSLABS", "Laurus Labs Ltd", 3, 1651.9, 1713.4],
+      ["IOLCP", "IOL Chemicals and Pharmaceuticals Ltd", 37, 151.28, 151.46],
+      ["EMCURE", "Emcure Pharmaceuticals Ltd", 3, 1895.7, 1924.8],
+      ["JLHL", "Jupiter Life Line Hospitals Ltd", 17, 319.09, 327.0],
+      ["ASTERDM", "Aster DM Quality Care Ltd", 7, 795.5, 801.5],
     ]),
   },
   {
@@ -172,16 +202,17 @@ const seedStrategies = (): Strategy[] => [
     sector: "Energy",
     indexSymbol: "NIFTY ENERGY",
     createdAt: new Date().toISOString(),
-    stocks: mkStocks([
-      ["THERMAX", "Thermax Limited", 2, 4514.0],
-      ["SOTL", "Savita Oil Technologies Ltd", 12, 645.75],
-      ["ONGC", "Oil and Natural Gas Corporation Ltd", 31, 248.76],
-      ["NLCINDIA", "NLC India Ltd", 27, 292.8],
-      ["COALINDIA", "Coal India Ltd", 19, 427.4],
-      ["CHENNPETRO", "Chennai Petroleum Corporation Ltd", 7, 1214.8],
-      ["AEGISLOG", "Aegis Logistics Ltd", 6, 1349.6],
-      ["ADANIPOWER", "Adani Power Ltd", 37, 213.66],
-      ["ADANIENSOL", "Adani Energy Solutions Ltd", 5, 1702.2],
+    // Custom portfolio snapshot (27-Jul-2026): [symbol, name, shares, avgBuy, current].
+    stocks: mkPortfolio([
+      ["THERMAX", "Thermax Limited", 1, 4459.5, 4454.5],
+      ["SOTL", "Savita Oil Technologies Ltd", 7, 637.75, 649.35],
+      ["ONGC", "Oil and Natural Gas Corporation Ltd", 17, 245.48, 238.56],
+      ["NLCINDIA", "NLC India Ltd", 15, 296.0, 298.45],
+      ["COALINDIA", "Coal India Ltd", 11, 426.6, 427.5],
+      ["CHENNPETRO", "Chennai Petroleum Corporation Ltd", 4, 1189.7, 1168.8],
+      ["AEGISLOG", "Aegis Logistics Ltd", 3, 1313.5, 1291.3],
+      ["ADANIPOWER", "Adani Power Ltd", 20, 215.45, 213.96],
+      ["ADANIENSOL", "Adani Energy Solutions Ltd", 3, 1710.0, 1703.3],
     ]),
   },
   {
@@ -190,18 +221,37 @@ const seedStrategies = (): Strategy[] => [
     sector: "Real Estate",
     indexSymbol: "NIFTY REALTY",
     createdAt: new Date().toISOString(),
-    // Target ("New Qty") from the rebalance screenshots; held comes from actuals.
-    stocks: mkStocks([
-      ["LODHA", "Lodha Developers Ltd", 29, 1144.09],
-      ["GOLDBEES", "Nippon India ETF Gold BeES", 289, 117.91],
-      ["PRESTIGE", "Prestige Estates Projects Ltd", 21, 1592.8],
-      ["PHOENIXLTD", "Phoenix Mills Ltd", 17, 2010.7],
-      ["OBEROIRLTY", "Oberoi Realty Ltd", 18, 1821.2],
-      ["GODREJPROP", "Godrej Properties Ltd", 17, 2028.7],
-      ["DLF", "DLF Ltd", 52, 645.2],
-      ["ANANTRAJ", "Anant Raj Ltd", 57, 586.54],
-      ["ABREL", "Aditya Birla Real Estate Ltd", 24, 1374.2],
-      ["SOBHA", "Sobha Ltd", 0, 1362.3],
+    // Custom portfolio snapshot (27-Jul-2026): [symbol, name, shares, avgBuy, current].
+    stocks: mkPortfolio([
+      ["GOLDBEES", "Nippon India ETF Gold BeES", 140, 118.63, 118.62],
+      ["LODHA", "Lodha Developers Ltd", 11, 1182.33, 1198.7],
+      ["PRESTIGE", "Prestige Estates Projects Ltd", 11, 1627.51, 1644.6],
+      ["PHOENIXLTD", "Phoenix Mills Ltd", 7, 2038.35, 2036.6],
+      ["OBEROIRLTY", "Oberoi Realty Ltd", 11, 1838.7, 1832.6],
+      ["GODREJPROP", "Godrej Properties Ltd", 7, 2042.98, 2078.8],
+      ["DLF", "DLF Ltd", 27, 646.62, 650.9],
+      ["ANANTRAJ", "Anant Raj Ltd", 26, 598.76, 616.9],
+      ["ABCAPITAL", "Aditya Birla Capital Ltd", 41, 397.49, 400.45],
+      ["SOBHA", "Sobha Ltd", 11, 1379.85, 1361.2],
+    ]),
+  },
+  {
+    id: uid(),
+    name: "Auto Stars",
+    sector: "Auto",
+    indexSymbol: "NIFTY AUTO",
+    createdAt: new Date().toISOString(),
+    // Auto Stars Tracker snapshot (27-Jul-2026): [symbol, name, shares, avgBuy, current].
+    stocks: mkPortfolio([
+      ["UNIPARTS", "Uniparts India Ltd", 6, 699.0, 704.8],
+      ["SJS", "SJS Enterprises Ltd", 2, 2355.5, 2419.3],
+      ["SHRIPISTON", "SPR Auto Technologies Ltd", 1, 4258.0, 4241.8],
+      ["SANSERA", "Sansera Engineering Ltd", 1, 3260.0, 3273.0],
+      ["GABRIEL", "Gabriel India Ltd", 3, 1411.9, 1437.8],
+      ["DIVGIITTS", "Divgi TorqTransfer Systems Ltd", 4, 967.15, 962.35],
+      ["BHARATFORG", "Bharat Forge Ltd", 2, 2171.69, 2181.3],
+      ["BELRISE", "Belrise Industries Ltd", 18, 228.64, 232.66],
+      ["ATHERENERG", "Ather Energy Ltd", 3, 1211.4, 1214.9],
     ]),
   },
 ];
@@ -243,8 +293,16 @@ export const useStore = create<Store>()(
       settings: { capitalINR: 200000, capitalUSD: 2000, maxDailyLossPct: 2, defaultBroker: "zerodha" },
       tradebook: null,
       setTradebook: (t) => set({ tradebook: t }),
+      pnl: null,
+      setPnl: (p) => set({ pnl: p }),
 
       strategies: seedStrategies(),
+      restoreBaskets: () =>
+        set((s) => {
+          const names = new Set(s.strategies.map((x) => x.name));
+          const toAdd = seedStrategies().filter((seed) => !names.has(seed.name));
+          return toAdd.length ? { strategies: [...s.strategies, ...toAdd] } : s;
+        }),
       addStrategy: (name, sector) =>
         set((s) => ({
           strategies: [
@@ -363,7 +421,19 @@ export const useStore = create<Store>()(
     {
       name: "trading-assistant",
       storage: createJSONStorage(() => localStorage),
-      version: 3,
+      // Runs on every rehydration (independent of version): guarantees every
+      // seeded basket (Pharma, Energy, Auto, Real Estate) is present, appending
+      // any that a previously-saved state is missing, without touching the rest.
+      merge: (persistedState, currentState) => {
+        const p = (persistedState ?? {}) as Partial<Store>;
+        const merged = { ...currentState, ...p } as Store;
+        const existing = merged.strategies ?? [];
+        const names = new Set(existing.map((x) => x.name));
+        const toAdd = seedStrategies().filter((seed) => !names.has(seed.name));
+        merged.strategies = toAdd.length ? [...existing, ...toAdd] : existing;
+        return merged;
+      },
+      version: 8,
       migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<Store>;
         // v2: ensure the seeded rotation baskets exist.
@@ -389,6 +459,30 @@ export const useStore = create<Store>()(
               return o ? { ...x, heldQty: o.qty, addedPrice: o.avg } : { ...x, heldQty: 0 };
             }),
           }));
+        }
+        // v4: append the Auto Stars basket if it isn't already there.
+        if (version < 4) {
+          const existing = state.strategies ?? [];
+          if (!existing.some((s) => s.name === "Auto Stars")) {
+            const auto = seedStrategies().find((s) => s.name === "Auto Stars");
+            if (auto) state.strategies = [...existing, auto];
+          }
+        }
+        // v5–v8: make sure EVERY seeded basket exists and matches its corrected
+        // custom-portfolio definition. Rebuild existing baskets by name (keeping
+        // their id), append any that are missing (e.g. Auto Stars), and keep any
+        // baskets the user created themselves.
+        if (version < 8) {
+          const existing = state.strategies ?? [];
+          const byName = new Map(existing.map((s) => [s.name, s]));
+          const seeds = seedStrategies();
+          const seedNames = new Set(seeds.map((s) => s.name));
+          const merged = seeds.map((seed) => {
+            const cur = byName.get(seed.name);
+            return cur ? { ...seed, id: cur.id } : seed;
+          });
+          for (const s of existing) if (!seedNames.has(s.name)) merged.push(s);
+          state.strategies = merged;
         }
         return state as Store;
       },

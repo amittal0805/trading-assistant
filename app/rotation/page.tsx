@@ -6,7 +6,7 @@ import { fetchQuotes, yahooSymbol, Quote } from "@/lib/quotes";
 import { fmtMoney, fmtNum, fmtPct, pnlClass } from "@/lib/format";
 import { PageTitle, Field, NumInput, StatCard, Empty } from "@/components/ui";
 import type { IndexRow } from "@/app/api/indices/route";
-import { RefreshCw, Trash2, Plus, X } from "lucide-react";
+import { RefreshCw, Trash2, Plus, X, RotateCcw } from "lucide-react";
 
 type Quotes = Record<string, Quote>;
 
@@ -34,6 +34,7 @@ export default function Rotation() {
   useEffect(() => setMounted(true), []);
   const {
     strategies,
+    restoreBaskets,
     addStrategy,
     updateStrategy,
     removeStrategy,
@@ -121,6 +122,9 @@ export default function Rotation() {
           <button className="btn-ghost flex items-center gap-2" onClick={refresh} disabled={loading}>
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Pricing…" : "Refresh prices"}
+          </button>
+          <button className="btn-ghost flex items-center gap-2" onClick={restoreBaskets} title="Re-add any missing default sector baskets">
+            <RotateCcw className="w-4 h-4" /> Restore baskets
           </button>
           <button className="btn-primary flex items-center gap-2" onClick={() => setNewStratOpen((v) => !v)}>
             <Plus className="w-4 h-4" /> New Strategy
@@ -296,7 +300,7 @@ function StrategyCard({
   const [held, setHeld] = useState<number | "">("");
 
   const rows = strategy.stocks.map((x) => {
-    const { price, changePct } = priceOf(x.symbol, x.exchange, x.addedPrice);
+    const { price, changePct } = priceOf(x.symbol, x.exchange, x.lastPrice ?? x.addedPrice);
     const value = isFinite(price) ? price * x.qty : NaN;
     const pnl = isFinite(price) && x.addedPrice ? (price - x.addedPrice) * x.qty : NaN;
     const change = x.qty - (x.heldQty ?? 0);

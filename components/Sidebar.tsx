@@ -19,6 +19,7 @@ import {
   Landmark,
   BarChart3,
   Flame,
+  Sparkles,
 } from "lucide-react";
 
 const nav = [
@@ -36,6 +37,7 @@ const nav = [
   { href: "/trends", label: "Trends", icon: TrendingUp },
   { href: "/brokerage", label: "Brokerage", icon: Receipt },
   { href: "/journal", label: "Journal", icon: BookOpen },
+  { href: "/style", label: "Trading Style", icon: Sparkles },
   { href: "/tax", label: "Tax", icon: Landmark },
 ];
 
