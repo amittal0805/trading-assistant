@@ -5,6 +5,7 @@ import { useStore } from "@/lib/store";
 import { fmtMoney, fmtPct, pnlClass } from "@/lib/format";
 import { PageTitle, Field, NumInput, StatCard, Empty } from "@/components/ui";
 import TradebookIntelligence from "@/components/TradebookIntelligence";
+import TradeMentor from "@/components/TradeMentor";
 import { Trash2 } from "lucide-react";
 
 const EMOTIONS = ["Calm", "Confident", "FOMO", "Fear", "Greed", "Revenge", "Impatient", "Disciplined"];
@@ -83,8 +84,6 @@ export default function Journal() {
     <div>
       <PageTitle title="Trade Journal" subtitle="Every trade logged is a lesson kept" />
 
-      <TradebookIntelligence />
-
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
           <StatCard label="Trades" value={String(stats.count)} />
@@ -94,6 +93,44 @@ export default function Journal() {
           <StatCard label="Total P/L" value={fmtMoney(stats.totalPnl)} pnl={stats.totalPnl} />
         </div>
       )}
+
+      {journal.length === 0 ? (
+        <Empty text="No journal entries yet." />
+      ) : (
+        <div className="space-y-3">
+          {journal.map((j) => (
+            <div key={j.id} className="card">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="font-medium">{j.symbol}</span>
+                <span className="text-xs text-muted">{j.date}</span>
+                <span className="text-xs font-mono text-muted">{j.qty} × {j.entry} → {j.exit}</span>
+                <span className={`font-mono text-sm ${pnlClass(j.outcome)}`}>{fmtMoney(j.outcome)}</span>
+                {j.tradeType && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 border border-accent/30 text-accent">{j.tradeType}</span>
+                )}
+                <span className="text-xs px-2 py-0.5 rounded-full bg-surface border border-border text-zinc-400">{j.emotion}</span>
+                <button onClick={() => removeJournal(j.id)} className="ml-auto text-zinc-600 hover:text-loss">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+              {(j.reason || j.mistakes || j.learning) && (
+                <div className="mt-2 text-xs text-zinc-400 space-y-0.5">
+                  {j.reason && <p><span className="text-muted">Reason:</span> {j.reason}</p>}
+                  {j.mistakes && <p><span className="text-muted">Mistakes:</span> {j.mistakes}</p>}
+                  {j.learning && <p><span className="text-muted">Learning:</span> {j.learning}</p>}
+                </div>
+              )}
+              {j.analysis && (
+                <details className="mt-2">
+                  <summary className="text-[11px] text-accent cursor-pointer select-none">Mentor&apos;s read</summary>
+                  <p className="text-[11px] text-zinc-400 mt-1 whitespace-pre-line leading-relaxed">{j.analysis}</p>
+                </details>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
 
       {breakdowns && (
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -156,36 +193,10 @@ export default function Journal() {
         </div>
       </div>
 
-      {journal.length === 0 ? (
-        <Empty text="No journal entries yet." />
-      ) : (
-        <div className="space-y-3">
-          {journal.map((j) => (
-            <div key={j.id} className="card">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span className="font-medium">{j.symbol}</span>
-                <span className="text-xs text-muted">{j.date}</span>
-                <span className="text-xs font-mono text-muted">{j.qty} × {j.entry} → {j.exit}</span>
-                <span className={`font-mono text-sm ${pnlClass(j.outcome)}`}>{fmtMoney(j.outcome)}</span>
-                {j.tradeType && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 border border-accent/30 text-accent">{j.tradeType}</span>
-                )}
-                <span className="text-xs px-2 py-0.5 rounded-full bg-surface border border-border text-zinc-400">{j.emotion}</span>
-                <button onClick={() => removeJournal(j.id)} className="ml-auto text-zinc-600 hover:text-loss">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-              {(j.reason || j.mistakes || j.learning) && (
-                <div className="mt-2 text-xs text-zinc-400 space-y-0.5">
-                  {j.reason && <p><span className="text-muted">Reason:</span> {j.reason}</p>}
-                  {j.mistakes && <p><span className="text-muted">Mistakes:</span> {j.mistakes}</p>}
-                  {j.learning && <p><span className="text-muted">Learning:</span> {j.learning}</p>}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <TradeMentor />
+
+      <TradebookIntelligence />
+
     </div>
   );
 }

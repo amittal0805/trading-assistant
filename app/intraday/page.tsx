@@ -1,18 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { requiredExitPrice, quantityPlan, profitGoalPlan } from "@/lib/calc";
-import { Broker, Exchange } from "@/lib/charges";
-import { fmtMoney, fmtNum, fmtPct, currencyFor } from "@/lib/format";
+import { Broker, Exchange, netPnl } from "@/lib/charges";
+import { fmtMoney, fmtNum, fmtPct, pnlClass, currencyFor } from "@/lib/format";
 import { PageTitle, Field, NumInput, Row } from "@/components/ui";
+import { useStore } from "@/lib/store";
 
-type Tab = "exit" | "pct" | "qty" | "goal";
+type Tab = "points" | "exit" | "pct" | "qty" | "goal";
 
 export default function Intraday() {
-  const [tab, setTab] = useState<Tab>("exit");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const { holdings } = useStore();
+
+  const [tab, setTab] = useState<Tab>("points");
   const [exchange, setExchange] = useState<Exchange>("NSE");
   const broker: Broker = exchange === "NSE" || exchange === "BSE" ? "zerodha" : "vested";
   const ccy = currencyFor(exchange);
+
+  // Points P&L (bulk) calc
+  const [ptHoldingId, setPtHoldingId] = useState<string>("");
+  const [ptEntry, setPtEntry] = useState<number | "">(500);
+  const [ptSizeMode, setPtSizeMode] = useState<"capital" | "qty">("capital");
+  const [ptCapital, setPtCapital] = useState<number | "">(1000000);
+  const [ptQtyIn, setPtQtyIn] = useState<number | "">(2000);
+  const [ptStep, setPtStep] = useState<number | "">(1);
+  const [ptLevels, setPtLevels] = useState<number | "">(6);
+  const [ptDir, setPtDir] = useState<"long" | "short">("long");
 
   // Exit price calc
   const [buyPrice, setBuyPrice] = useState<number | "">(100);
@@ -75,12 +90,59 @@ export default function Intraday() {
         })
       : null;
 
+  // Points P&L: size in bulk, then see net P&L at each point move up/down.
+  const ptPrice = Number(ptEntry) || 0;
+  const ptQty =
+    ptSizeMode === "capital"
+      ? ptPrice > 0
+        ? Math.floor((Number(ptCapital) || 0) / ptPrice)
+        : 0
+      : Math.floor(Number(ptQtyIn) || 0);
+  const ptDeployed = ptQty * ptPrice;
+  const ptStepN = Number(ptStep) || 0;
+  const ptLevelsN = Math.max(1, Math.min(30, Math.floor(Number(ptLevels) || 0)));
+
+  const ptLadder =
+    ptPrice > 0 && ptQty > 0 && ptStepN > 0
+      ? Array.from({ length: ptLevelsN * 2 + 1 }, (_, i) => {
+          const level = ptLevelsN - i; // +levels .. 0 .. -levels
+          const move = level * ptStepN;
+          const exit = ptPrice + move;
+          if (exit <= 0) return null;
+          const leg =
+            ptDir === "long"
+              ? { buyPrice: ptPrice, sellPrice: exit, qty: ptQty, exchange, segment: "intraday" as const }
+              : { buyPrice: exit, sellPrice: ptPrice, qty: ptQty, exchange, segment: "intraday" as const };
+          const r = netPnl(leg, broker);
+          return { move, exit, gross: r.gross, charges: r.charges.total, net: r.net, pct: (move / ptPrice) * 100 };
+        }).filter((x): x is NonNullable<typeof x> => x !== null)
+      : [];
+
+  // Breakeven: move needed just to cover charges (net = 0).
+  const ptBreakeven =
+    ptPrice > 0 && ptQty > 0
+      ? requiredExitPrice({ buyPrice: ptPrice, qty: ptQty, targetNet: 0, broker, exchange, segment: "intraday" })
+      : null;
+  const ptBreakevenPts = ptBreakeven ? Math.abs(ptBreakeven.exitPrice - ptPrice) : 0;
+
+  const pickPtHolding = (id: string) => {
+    setPtHoldingId(id);
+    const h = holdings.find((x) => x.id === id);
+    if (h) {
+      setExchange(h.exchange);
+      setPtEntry(h.currentPrice);
+    }
+  };
+
   const tabs: { id: Tab; label: string }[] = [
+    { id: "points", label: "Points P&L (bulk)" },
     { id: "exit", label: "Required Exit Price" },
     { id: "pct", label: "% Target Price" },
     { id: "qty", label: "Quantity Calculator" },
     { id: "goal", label: "Profit Goal Planner" },
   ];
+
+  if (!mounted) return null;
 
   return (
     <div>
@@ -99,6 +161,159 @@ export default function Intraday() {
           </select>
         </div>
       </div>
+
+      {tab === "points" && (
+        <div className="grid lg:grid-cols-[340px_1fr] gap-4">
+          <div className="card h-fit">
+            <h2 className="text-sm font-medium mb-4">Trade Setup</h2>
+            <div className="space-y-3">
+              {holdings.length > 0 && (
+                <Field label="Load from Holdings">
+                  <select className="input" value={ptHoldingId} onChange={(e) => pickPtHolding(e.target.value)}>
+                    <option value="">— manual entry —</option>
+                    {holdings.map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.symbol} · {fmtNum(h.currentPrice, 2)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <Field label={`Entry Price (${ccy})`}>
+                <NumInput value={ptEntry} onChange={setPtEntry} />
+              </Field>
+
+              <div>
+                <label className="label">Direction</label>
+                <div className="inline-flex rounded-lg bg-surface p-0.5 w-full">
+                  {(["long", "short"] as const).map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setPtDir(d)}
+                      className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
+                        ptDir === d ? "bg-accent text-white" : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Size by</label>
+                <div className="inline-flex rounded-lg bg-surface p-0.5 w-full mb-2">
+                  {(["capital", "qty"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setPtSizeMode(m)}
+                      className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                        ptSizeMode === m ? "bg-accent text-white" : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {m === "capital" ? "Capital" : "Quantity"}
+                    </button>
+                  ))}
+                </div>
+                {ptSizeMode === "capital" ? (
+                  <NumInput value={ptCapital} onChange={setPtCapital} placeholder="1000000" />
+                ) : (
+                  <NumInput value={ptQtyIn} onChange={setPtQtyIn} placeholder="2000" />
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={`Point Step (${ccy})`}>
+                  <NumInput value={ptStep} onChange={setPtStep} />
+                </Field>
+                <Field label="Levels each side">
+                  <NumInput value={ptLevels} onChange={setPtLevels} />
+                </Field>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="card">
+                <div className="text-[11px] text-muted">Quantity</div>
+                <div className="text-lg font-semibold font-mono mt-0.5">{fmtNum(ptQty, 0)}</div>
+              </div>
+              <div className="card">
+                <div className="text-[11px] text-muted">Capital deployed</div>
+                <div className="text-lg font-semibold font-mono mt-0.5">{fmtMoney(ptDeployed, ccy, 0)}</div>
+              </div>
+              <div className="card">
+                <div className="text-[11px] text-muted">₹ per 1 point</div>
+                <div className="text-lg font-semibold font-mono mt-0.5 text-accent">{fmtMoney(ptQty, ccy, 0)}</div>
+              </div>
+              <div className="card">
+                <div className="text-[11px] text-muted">Breakeven move</div>
+                <div className="text-lg font-semibold font-mono mt-0.5">
+                  {ptBreakevenPts ? `${fmtNum(ptBreakevenPts, 2)} pts` : "—"}
+                </div>
+              </div>
+            </div>
+
+            {ptLadder.length > 0 ? (
+              <div className="card p-0 overflow-x-auto">
+                <div className="px-4 pt-4">
+                  <h2 className="text-sm font-medium">
+                    P&amp;L ladder — {ptDir === "long" ? "long" : "short"} {fmtNum(ptQty, 0)} @ {fmtMoney(ptPrice, ccy)}
+                  </h2>
+                  <p className="text-[11px] text-zinc-500 mt-1 mb-2">
+                    Net is after intraday round-trip charges. Each 1-point move is worth {fmtMoney(ptQty, ccy, 0)}.
+                  </p>
+                </div>
+                <table className="w-full min-w-[560px]">
+                  <thead>
+                    <tr>
+                      <th className="th">Move</th>
+                      <th className="th text-right">Exit Price</th>
+                      <th className="th text-right">Gross P&amp;L</th>
+                      <th className="th text-right">Charges</th>
+                      <th className="th text-right">Net P&amp;L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ptLadder.map((r) => {
+                      const favorable = ptDir === "long" ? r.move > 0 : r.move < 0;
+                      const zero = r.move === 0;
+                      return (
+                        <tr key={r.move} className={zero ? "bg-surface/40" : favorable ? "bg-gain/5" : "bg-loss/5"}>
+                          <td className={`td font-mono ${r.move > 0 ? "text-gain" : r.move < 0 ? "text-loss" : "text-zinc-400"}`}>
+                            {r.move > 0 ? "+" : ""}
+                            {fmtNum(r.move, 2)} pt ({fmtPct(r.pct)})
+                          </td>
+                          <td className="td text-right font-mono">{fmtMoney(r.exit, ccy)}</td>
+                          <td className={`td text-right font-mono ${pnlClass(r.gross)}`}>{fmtMoney(r.gross, ccy, 0)}</td>
+                          <td className="td text-right font-mono text-loss">{fmtMoney(r.charges, ccy, 0)}</td>
+                          <td className={`td text-right font-mono font-semibold ${pnlClass(r.net)}`}>
+                            {fmtMoney(r.net, ccy, 0)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="text-[11px] text-zinc-500 px-4 py-3">
+                  You&apos;re {ptDir}. A favourable {fmtNum(ptStepN, 2)}-point move nets about{" "}
+                  <span className={pnlClass(1)}>
+                    {fmtMoney(ptLadder.find((r) => (ptDir === "long" ? r.move === ptStepN : r.move === -ptStepN))?.net ?? 0, ccy, 0)}
+                  </span>
+                  ; the same move against you costs{" "}
+                  <span className={pnlClass(-1)}>
+                    {fmtMoney(ptLadder.find((r) => (ptDir === "long" ? r.move === -ptStepN : r.move === ptStepN))?.net ?? 0, ccy, 0)}
+                  </span>
+                  . You need ~{fmtNum(ptBreakevenPts, 2)} points just to cover charges.
+                </p>
+              </div>
+            ) : (
+              <div className="card text-sm text-zinc-500">Enter an entry price, size, and point step to see the ladder.</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {tab === "exit" && (
         <div className="grid md:grid-cols-2 gap-4 max-w-4xl">

@@ -215,12 +215,16 @@ export default function TradingStyle() {
 
           {/* Headline metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <StatCard
-              label="Net P/L"
-              value={fmtMoney(assessment.net)}
-              pnl={assessment.net}
-              sub={assessment.netSource === "pnl-statement" ? "realized · from P&L statement" : "estimated from tradebook"}
-            />
+            {assessment.reliableNet ? (
+              <StatCard label="Net P/L" value={fmtMoney(assessment.net)} pnl={assessment.net} sub="realized · from P&L statement" />
+            ) : (
+              <StatCard
+                label="Intraday/scalp P/L"
+                value={fmtMoney(assessment.sameDayNet)}
+                pnl={assessment.sameDayNet}
+                sub="accurate · swing needs P&L"
+              />
+            )}
             <StatCard
               label="Win rate"
               value={`${assessment.winRate.toFixed(0)}%`}

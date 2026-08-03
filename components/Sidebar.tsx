@@ -13,13 +13,13 @@ import {
   BookOpen,
   CandlestickChart,
   Repeat,
-  TrendingUp,
   Eye,
   ClipboardList,
   Landmark,
   BarChart3,
   Flame,
   Sparkles,
+  Wallet,
 } from "lucide-react";
 
 const nav = [
@@ -29,12 +29,12 @@ const nav = [
   { href: "/intraday", label: "Intraday Assistant", icon: Calculator },
   { href: "/positions", label: "Positions", icon: Activity },
   { href: "/holdings", label: "Holdings", icon: Briefcase },
+  { href: "/funds", label: "Mutual Funds", icon: Wallet },
   { href: "/averaging", label: "Dip Buying", icon: TrendingDown },
   { href: "/scalping", label: "Scalping", icon: Scissors },
   { href: "/watchlist", label: "Watchlist", icon: Eye },
   { href: "/review", label: "Review", icon: ClipboardList },
   { href: "/rotation", label: "Sectoral Rotation", icon: Repeat },
-  { href: "/trends", label: "Trends", icon: TrendingUp },
   { href: "/brokerage", label: "Brokerage", icon: Receipt },
   { href: "/journal", label: "Journal", icon: BookOpen },
   { href: "/style", label: "Trading Style", icon: Sparkles },

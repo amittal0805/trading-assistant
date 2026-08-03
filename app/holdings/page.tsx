@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, Holding } from "@/lib/store";
-import { Exchange, Broker } from "@/lib/charges";
-import { fmtMoney, fmtPct, pnlClass, currencyFor } from "@/lib/format";
+import { Exchange, Broker, netPnl } from "@/lib/charges";
+import { fmtMoney, fmtNum, fmtPct, pnlClass, currencyFor } from "@/lib/format";
 import { PageTitle, Field, NumInput, Empty } from "@/components/ui";
-import { Trash2, RefreshCw, Upload } from "lucide-react";
+import { Trash2, RefreshCw, Upload, HandCoins, X } from "lucide-react";
 import { fetchQuotes, yahooSymbol } from "@/lib/quotes";
 import { parseKiteRows } from "@/lib/kite";
 
@@ -14,7 +14,20 @@ type SortKey = "symbol" | "qty" | "avgPrice" | "currentPrice" | "invested" | "va
 export default function Holdings() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const { holdings, addHolding, importHoldings, updateHolding, removeHolding } = useStore();
+  const { holdings, addHolding, sellHolding, importHoldings, updateHolding, removeHolding } = useStore();
+
+  // Sell panel state
+  const [sellId, setSellId] = useState<string | null>(null);
+  const [sellQty, setSellQty] = useState<number | "">("");
+  const [sellPrice, setSellPrice] = useState<number | "">("");
+  const [soldMsg, setSoldMsg] = useState<string | null>(null);
+
+  const openSell = (h: Holding) => {
+    setSellId(h.id);
+    setSellQty(h.qty);
+    setSellPrice(h.currentPrice);
+    setSoldMsg(null);
+  };
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -246,6 +259,76 @@ export default function Holdings() {
         </div>
       </div>
 
+      {soldMsg && <p className="text-xs text-gain mb-3">{soldMsg}</p>}
+
+      {(() => {
+        const h = holdings.find((x) => x.id === sellId);
+        if (!h) return null;
+        const ccy = currencyFor(h.exchange);
+        const q = Math.min(Number(sellQty) || 0, h.qty);
+        const px = Number(sellPrice) || 0;
+        const gross = (px - h.avgPrice) * q;
+        const est =
+          q > 0 && px > 0
+            ? netPnl({ buyPrice: h.avgPrice, sellPrice: px, qty: q, exchange: h.exchange, segment: "delivery" }, h.broker)
+            : null;
+        return (
+          <div className="card mb-4 border-accent/30">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-medium flex items-center gap-2">
+                <HandCoins className="w-4 h-4 text-accent" />
+                Sell {h.symbol} <span className="text-muted font-normal">· holding {fmtNum(h.qty, 0)} @ {fmtMoney(h.avgPrice, ccy)}</span>
+              </h2>
+              <button className="text-zinc-500 hover:text-zinc-200" onClick={() => setSellId(null)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-28">
+                <Field label="Quantity"><NumInput value={sellQty} onChange={setSellQty} /></Field>
+              </div>
+              <div className="w-32">
+                <Field label={`Exit Price (${ccy})`}><NumInput value={sellPrice} onChange={setSellPrice} /></Field>
+              </div>
+              <div className="text-sm pb-1.5 flex-1 min-w-[240px]">
+                {q > 0 && px > 0 ? (
+                  <span className="text-muted">
+                    Realized:{" "}
+                    <span className={`font-mono font-semibold ${pnlClass(gross)}`}>{fmtMoney(gross, ccy)}</span>
+                    {est && (
+                      <>
+                        {" "}· net of est. charges{" "}
+                        <span className={`font-mono ${pnlClass(est.net)}`}>{fmtMoney(est.net, ccy)}</span>
+                      </>
+                    )}
+                    {q < h.qty && <span className="text-zinc-500"> · {fmtNum(h.qty - q, 0)} shares remain</span>}
+                    {q >= h.qty && <span className="text-amber-400"> · full exit</span>}
+                  </span>
+                ) : (
+                  <span className="text-zinc-500">Enter quantity and exit price.</span>
+                )}
+              </div>
+              <button
+                className="btn-primary"
+                disabled={!(q > 0 && px > 0)}
+                onClick={() => {
+                  sellHolding(h.id, q, px);
+                  setSellId(null);
+                  setSoldMsg(
+                    `Sold ${fmtNum(q, 0)} ${h.symbol} @ ${fmtMoney(px, ccy)} — booked ${fmtMoney(gross, ccy)}. It now shows under Booked P&L in your sectors.`
+                  );
+                }}
+              >
+                Confirm sale
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-500 mt-2">
+              This records the sale in the app (booked P&amp;L, sector + dashboard) — it does not place a broker order.
+            </p>
+          </div>
+        );
+      })()}
+
       {sorted.length === 0 ? (
         <Empty
           text={
@@ -306,9 +389,14 @@ export default function Holdings() {
                     </td>
                     <td className="td text-xs text-muted">{h.type === "longterm" ? "Long Term" : "Swing"}</td>
                     <td className="td">
-                      <button onClick={() => removeHolding(h.id)} className="text-zinc-600 hover:text-loss">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => openSell(h)} className="text-zinc-500 hover:text-accent" title="Sell (books realized P&L)">
+                          <HandCoins className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => removeHolding(h.id)} className="text-zinc-600 hover:text-loss" title="Remove without booking">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
