@@ -14,7 +14,7 @@ type SortKey = "symbol" | "qty" | "avgPrice" | "currentPrice" | "invested" | "va
 export default function Holdings() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const { holdings, addHolding, sellHolding, importHoldings, updateHolding, removeHolding } = useStore();
+  const { holdings, addHolding, sellHolding, importHoldings, replaceHoldings, updateHolding, removeHolding } = useStore();
 
   // Sell panel state
   const [sellId, setSellId] = useState<string | null>(null);
@@ -113,14 +113,14 @@ export default function Holdings() {
         };
       })
       .filter((r) => r.symbol && isFinite(r.qty) && r.qty > 0 && isFinite(r.avgPrice) && r.avgPrice > 0);
-    if (parsed.length > 0) importHoldings(parsed);
+    if (parsed.length > 0) replaceHoldings(parsed, "USD");
     return parsed.length;
   };
 
   const onImportFile = async (f: File) => {
     if (f.name.toLowerCase().endsWith(".xlsx")) {
       const n = await importVested(f);
-      setImportMsg(n > 0 ? `Imported ${n} US holdings from Vested` : "No holdings found — is this a Vested export?");
+      setImportMsg(n > 0 ? `Imported ${n} US holdings from Vested — replaced the existing US set` : "No holdings found — is this a Vested export?");
       return;
     }
     const rows = parseKiteRows(await f.text());
@@ -128,7 +128,7 @@ export default function Holdings() {
       setImportMsg("No valid rows found — is this a Kite holdings CSV?");
       return;
     }
-    importHoldings(
+    replaceHoldings(
       rows.map((r) => ({
         symbol: r.symbol,
         qty: r.qty,
@@ -137,9 +137,10 @@ export default function Holdings() {
         exchange: "NSE" as const,
         broker: "zerodha" as const,
         type: "longterm" as const,
-      }))
+      })),
+      "INR"
     );
-    setImportMsg(`Imported ${rows.length} holdings (zero-qty rows skipped)`);
+    setImportMsg(`Imported ${rows.length} Indian holdings — replaced the existing Indian set (zero-qty rows skipped)`);
   };
 
   const refreshPrices = async () => {

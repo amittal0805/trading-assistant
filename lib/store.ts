@@ -157,6 +157,7 @@ interface Store {
   addHolding: (h: Omit<Holding, "id">) => void;
   sellHolding: (id: string, qty: number, exitPrice: number) => void;
   importHoldings: (rows: Omit<Holding, "id">[]) => void;
+  replaceHoldings: (rows: Omit<Holding, "id">[], currency: "INR" | "USD") => void;
   updateHolding: (id: string, patch: Partial<Holding>) => void;
   removeHolding: (id: string) => void;
   addPosition: (p: Omit<Position, "id" | "openedAt" | "status">) => void;
@@ -385,9 +386,9 @@ const seedPositions = (): Position[] =>
 const seedFunds = (): MutualFund[] =>
   (
     [
-      ["Invesco India Focused Fund", "Direct - Growth", 31.71, 0.31, 21760.999, 28.58, 621946, 690041],
-      ["Kotak Multicap Fund", "Direct - Growth", 21.58, -0.05, 26923.564, 20.51, 552202, 581091],
-      ["HDFC Small Cap Fund", "Direct - Growth", 160.75, 0.44, 3661.287, 150.3, 550288, 588559],
+      ["Invesco India Focused Fund", "Direct - Growth", 32.13, 1.32, 21760.999, 28.57, 621800, 699180],
+      ["Kotak Multicap Fund", "Direct - Growth", 21.8, 1.0, 26923.564, 20.51, 552336, 586933],
+      ["HDFC Small Cap Fund", "Direct - Growth", 163.69, 1.83, 3754.593, 150.6, 565451, 614626],
     ] as [string, string, number, number, number, number, number, number][]
   ).map(([name, category, nav, navChangePct, units, avgBuyNav, currentInvestment, currentValue]) => ({
     id: uid(),
@@ -588,6 +589,19 @@ export const useStore = create<Store>()(
           });
           return { holdings };
         }),
+      // Replace the holdings for one market (INR or USD) wholesale with the
+      // uploaded set, so names no longer in the file are dropped. The other
+      // market's holdings are left untouched.
+      replaceHoldings: (rows, currency) => {
+        const isINR = (exch: Exchange) => exch === "NSE" || exch === "BSE";
+        const inScope = (exch: Exchange) => (currency === "INR" ? isINR(exch) : !isINR(exch));
+        set((s) => ({
+          holdings: [
+            ...s.holdings.filter((h) => !inScope(h.exchange)),
+            ...rows.map((r) => ({ ...r, id: uid() })),
+          ],
+        }));
+      },
       updateHolding: (id, patch) =>
         set((s) => ({ holdings: s.holdings.map((h) => (h.id === id ? { ...h, ...patch } : h)) })),
       removeHolding: (id) => set((s) => ({ holdings: s.holdings.filter((h) => h.id !== id) })),
@@ -707,7 +721,7 @@ export const useStore = create<Store>()(
         }
         return merged;
       },
-      version: 13,
+      version: 14,
       migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<Store>;
         // v2: ensure the seeded rotation baskets exist.
@@ -758,9 +772,9 @@ export const useStore = create<Store>()(
           for (const s of existing) if (!seedNames.has(s.name)) merged.push(s);
           state.strategies = merged;
         }
-        // v11: refresh the seeded mutual funds to the latest snapshot values
-        // (match by name, keep id), keep any funds the user added themselves.
-        if (version < 11) {
+        // v11 & v14: refresh the seeded mutual funds to the latest snapshot
+        // values (match by name, keep id), keep any funds the user added.
+        if (version < 11 || version < 14) {
           const funds = state.mutualFunds ?? [];
           const seeded = Object.fromEntries(seedFunds().map((f) => [f.name, f]));
           const names = new Set(funds.map((f) => f.name));

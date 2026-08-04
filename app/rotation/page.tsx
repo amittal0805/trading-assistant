@@ -10,6 +10,7 @@ import type { IndexRow } from "@/app/api/indices/route";
 import type { Indicator } from "@/app/api/indicators/route";
 import IntradayDrawer from "@/components/IntradayDrawer";
 import { analyzeIntraday } from "@/lib/intraday";
+import { sectorCall, SectorCall } from "@/lib/sectorAgent";
 import { RefreshCw, Trash2, Plus, X, RotateCcw, Activity, Upload } from "lucide-react";
 
 type Quotes = Record<string, Quote>;
@@ -309,6 +310,52 @@ export default function Rotation() {
     return { price: fallback ?? NaN, changePct: null as number | null };
   };
 
+  // The desk agent's call for every sector (stance + rationale + per-stock actions).
+  const sectorCalls: Record<string, SectorCall> = {};
+  for (const st of strategies) {
+    const sym = resolveIndex(st);
+    const idx = sym ? indexBySymbol[sym] : undefined;
+    const verdict = idx ? sectorSignal(idx)?.label ?? null : null;
+    const be = st.benchmarkEntry;
+    const idxPct = idx && be && be.level > 0 ? ((idx.last - be.level) / be.level) * 100 : null;
+    let inv = 0;
+    let val = 0;
+    const stocks = st.stocks.map((x) => {
+      const { price, changePct } = priceOf(x.symbol, x.exchange, x.lastPrice ?? x.addedPrice);
+      const held = x.heldQty ?? x.qty;
+      if (isFinite(price) && x.addedPrice) {
+        inv += held * x.addedPrice;
+        val += held * price;
+      }
+      const ind = indicators[yahooSymbol(x.symbol, x.exchange)];
+      return {
+        symbol: x.symbol,
+        name: x.name,
+        heldQty: held,
+        avg: x.addedPrice ?? price,
+        price,
+        dayPct: changePct,
+        breakoutScore: ind?.breakout?.score ?? null,
+        sma50: ind?.sma50 ?? null,
+        sma200: ind?.sma200 ?? null,
+        rsi: ind?.rsi ?? null,
+        high52: ind?.high52 ?? null,
+        low52: ind?.low52 ?? null,
+        booked: realizedNow[x.symbol] ?? 0,
+        exited: (heldNow[x.symbol] ?? 0) <= 0 && realizedNow[x.symbol] != null,
+      };
+    });
+    const basketPnlPct = inv > 0 ? ((val - inv) / inv) * 100 : 0;
+    sectorCalls[st.id] = sectorCall({
+      name: st.name,
+      verdict,
+      indexMom1M: idx && isFinite(idx.pct30d) ? idx.pct30d : null,
+      basketPnlPct,
+      alphaPct: idxPct != null ? basketPnlPct - idxPct : null,
+      stocks,
+    });
+  }
+
   const portfolioTotal = strategies.reduce((tot, st) => {
     return (
       tot +
@@ -377,6 +424,9 @@ export default function Rotation() {
 
       {importMsg && <p className="text-xs text-accent mb-3">{importMsg}</p>}
 
+      {/* Desk agent — a trading call per sector */}
+      {strategies.length > 0 && <SectorDesk strategies={strategies} calls={sectorCalls} />}
+
       {/* Sector breakout radar — daily-candle study across every basket */}
       {Object.keys(indicators).length > 0 && (
         <SectorBreakoutRadar strategies={strategies} indicators={indicators} indexBySymbol={indexBySymbol} resolve={resolveIndex} />
@@ -433,6 +483,7 @@ export default function Rotation() {
               showInd={showInd}
               heldNow={heldNow}
               realizedNow={realizedNow}
+              call={sectorCalls[st.id]}
               sortKey={sortKey}
               sortDir={sortDir}
               onSort={onSort}
@@ -806,6 +857,86 @@ function ReEntrySignals({
   );
 }
 
+const STANCE_TONE: Record<string, string> = {
+  gain: "bg-gain/15 text-gain border border-gain/30",
+  amber: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
+  loss: "bg-loss/15 text-loss border border-loss/30",
+  muted: "bg-surface text-zinc-400 border border-border",
+};
+const ACTION_TONE: Record<string, string> = {
+  gain: "text-gain",
+  amber: "text-amber-400",
+  loss: "text-loss",
+  muted: "text-zinc-400",
+};
+
+// Top-of-page "desk" — one call per sector at a glance.
+function SectorDesk({ strategies, calls }: { strategies: Strategy[]; calls: Record<string, SectorCall> }) {
+  const rows = strategies.map((st) => ({ name: st.name, call: calls[st.id] })).filter((r) => r.call);
+  if (!rows.length) return null;
+  return (
+    <div className="card mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <Activity className="w-4 h-4 text-accent" />
+        <h2 className="text-sm font-medium">Desk agent — the call on each sector</h2>
+        <span className="text-[11px] text-muted">verdict + your P&L/alpha + breakout &amp; trend of each stock</span>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-2">
+        {rows.map(({ name, call }) => (
+          <div key={name} className="flex items-start gap-2 text-sm">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STANCE_TONE[call!.tone]}`}>{call!.stance}</span>
+            <div className="min-w-0">
+              <span className="font-medium">{name}</span>
+              <span className="text-muted text-xs"> — {call!.headline}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Per-card agent call: stance, rationale, and per-stock actions.
+function SectorAgentCall({ call, onOpenStock }: { call: SectorCall; onOpenStock: (symbol: string, name?: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="px-4 py-2.5 bg-surface/30 border-b border-border">
+      <button className="flex items-center gap-2 w-full text-left" onClick={() => setOpen((o) => !o)}>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STANCE_TONE[call.tone]}`}>{call.stance}</span>
+        <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{call.headline}</span>
+        <span className="text-[11px] text-accent shrink-0">{open ? "hide" : "details"}</span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {call.rationale.length > 0 && (
+            <ul className="space-y-1">
+              {call.rationale.map((r, i) => (
+                <li key={i} className="text-xs text-zinc-400 flex gap-2">
+                  <span className="text-accent mt-0.5">•</span>
+                  <span>{r}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="space-y-1">
+            {call.actions.map((a) => (
+              <button
+                key={a.symbol}
+                onClick={() => onOpenStock(a.symbol)}
+                className="w-full text-left flex items-start gap-2 text-xs hover:bg-surface/50 rounded px-1 py-0.5"
+              >
+                <span className={`font-medium w-14 shrink-0 ${ACTION_TONE[a.tone]}`}>{a.action}</span>
+                <span className="font-mono w-24 shrink-0">{a.symbol}</span>
+                <span className="text-zinc-400 min-w-0">{a.note}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Sector-level breakout ranking: top stock scores + index 1-month momentum.
 function SectorBreakoutRadar({
   strategies,
@@ -982,6 +1113,7 @@ function StrategyCard({
   showInd,
   heldNow,
   realizedNow,
+  call,
   sortKey,
   sortDir,
   onSort,
@@ -1002,6 +1134,7 @@ function StrategyCard({
   showInd: boolean;
   heldNow: Record<string, number>;
   realizedNow: Record<string, number>;
+  call?: SectorCall;
   sortKey: SortKey;
   sortDir: "asc" | "desc";
   onSort: (k: SortKey) => void;
@@ -1168,6 +1301,8 @@ function StrategyCard({
           <span className={`font-mono font-semibold ${pnlClass(booked)}`}>{fmtMoney(booked)}</span>.
         </div>
       )}
+
+      {call && <SectorAgentCall call={call} onOpenStock={onOpenStock} />}
 
       <ReEntrySignals strategy={strategy} priceOf={priceOf} benchmark={benchmark} onOpenStock={onOpenStock} />
 
