@@ -22,6 +22,7 @@ export interface Indicator {
   high52: number | null;
   low52: number | null;
   breakout: BreakoutStudy | null;
+  btstDaily: { closePosPct: number; dayChangePct: number; volSurge: number; bullish: boolean } | null;
 }
 
 export interface BreakoutStudy {
@@ -165,6 +166,27 @@ async function computeOne(symbol: string): Promise<Indicator> {
   const rsiV = rsi(closes, 14);
   const high52 = highs.length ? Math.max(...highs) : closes.length ? Math.max(...closes) : null;
 
+  // Last daily candle snapshot for BTST screening.
+  let btstDaily: Indicator["btstDaily"] = null;
+  const li = closes.length - 1;
+  if (li >= 20 && [opens[li], highs[li], lows[li], closes[li]].every((x) => typeof x === "number" && isFinite(x))) {
+    const o = opens[li];
+    const h = highs[li];
+    const l = lows[li];
+    const c = closes[li];
+    const prevC = closes[li - 1];
+    const rng = Math.max(h - l, 1e-9);
+    const closePosPct = ((c - l) / rng) * 100;
+    const dayChangePct = typeof prevC === "number" && prevC > 0 ? ((c - prevC) / prevC) * 100 : ((c - o) / o) * 100;
+    const vol20 = volumes.slice(-21, -1).filter((x: number) => x > 0);
+    const avg20 = vol20.length ? vol20.reduce((s: number, x: number) => s + x, 0) / vol20.length : 0;
+    const volSurge = avg20 > 0 ? (volumes[li] || 0) / avg20 : 0;
+    const lastBar = [{ t: times[li] ?? li, o, h, l, c, v: volumes[li] ?? 0 }];
+    const prevBar = li >= 1 ? [{ t: times[li - 1] ?? li - 1, o: opens[li - 1], h: highs[li - 1], l: lows[li - 1], c: prevC, v: volumes[li - 1] ?? 0 }] : [];
+    const bullish = analyzeCandles([...prevBar, ...lastBar]).slice(-1)[0]?.patterns.some((pp) => pp.bias === "bullish") ?? false;
+    btstDaily = { closePosPct, dayChangePct, volSurge, bullish };
+  }
+
   const data: Indicator = {
     price,
     sma50: sma50v,
@@ -176,6 +198,7 @@ async function computeOne(symbol: string): Promise<Indicator> {
       price != null && high52 != null && closes.length >= 30
         ? breakoutStudy(price, sma50v, sma200v, rsiV, high52, highs, lows, closes, opens, volumes, times)
         : null,
+    btstDaily,
   };
   cache.set(symbol, { data, ts: Date.now() });
   return data;

@@ -721,7 +721,7 @@ export const useStore = create<Store>()(
         }
         return merged;
       },
-      version: 14,
+      version: 15,
       migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<Store>;
         // v2: ensure the seeded rotation baskets exist.
@@ -771,6 +771,11 @@ export const useStore = create<Store>()(
           });
           for (const s of existing) if (!seedNames.has(s.name)) merged.push(s);
           state.strategies = merged;
+        }
+        // v15: refresh Kite holdings & positions from the latest export.
+        if (version < 15) {
+          state.holdings = seedHoldings();
+          state.positions = seedPositions();
         }
         // v11 & v14: refresh the seeded mutual funds to the latest snapshot
         // values (match by name, keep id), keep any funds the user added.
