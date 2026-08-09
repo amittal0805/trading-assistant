@@ -137,12 +137,12 @@ export function compareProperty(i: PropInput): PropResult {
 // ---------------------------------------------------------------------------
 // Combined portfolio: fund the flat's installments out of a corpus (e.g. 2.5
 // Cr), and keep the rest of the corpus working — a slice in FD, the rest in the
-// market. Answers "what does my whole 2.5 Cr do?", and whether diverting cash
+// market. Answers "what does my whole 2.33 Cr do?", and whether diverting cash
 // into the flat beats simply investing the entire corpus 30/70.
 // ---------------------------------------------------------------------------
 
 export interface CombinedInput {
-  corpus: number; // total money you have (e.g. 2.5 Cr)
+  corpus: number; // total money you have (e.g. 2.33 Cr)
   fdPct: number; // % of the idle corpus kept in FD
   fdReturnPct: number; // FD rate
   marketReturnPct: number; // your market/trading return on the rest

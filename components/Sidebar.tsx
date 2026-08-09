@@ -22,6 +22,7 @@ import {
   Target,
   Home,
   ListChecks,
+  Goal,
 } from "lucide-react";
 
 const nav = [
@@ -41,6 +42,7 @@ const nav = [
   { href: "/brokerage", label: "Brokerage", icon: Receipt },
   { href: "/journal", label: "Journal", icon: BookOpen },
   { href: "/style", label: "Trading Style", icon: Sparkles },
+  { href: "/strategy", label: "Strategy", icon: Goal },
   { href: "/plan", label: "5-Year Plan", icon: Target },
   { href: "/property", label: "Property vs Stocks", icon: Home },
 ];

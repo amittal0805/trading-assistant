@@ -5,7 +5,7 @@
 // money-weighted XIRR on the capital actually put to work.
 
 export interface ProjInput {
-  corpus: number; // total capital available (e.g. 2.5 Cr)
+  corpus: number; // total capital available (e.g. 2.33 Cr)
   initialDeploy: number; // deployed on day one (e.g. 1 Cr)
   trancheSize: number; // added each interval
   trancheEveryMonths: number; // interval between tranches

@@ -25,8 +25,8 @@ export default function Plan() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const [corpus, setCorpus] = useState<number | "">(25000000); // 2.5 Cr
-  const [initialDeploy, setInitialDeploy] = useState<number | "">(10000000); // 1 Cr
+  const [corpus, setCorpus] = useState<number | "">(23300000); // 2.33 Cr
+  const [initialDeploy, setInitialDeploy] = useState<number | "">(3500000); // 35 L in play (₹18 L already invested, rest from 25 Aug)
   const [trancheSize, setTrancheSize] = useState<number | "">(2500000); // 25 L
   const [trancheEvery, setTrancheEvery] = useState<number | "">(6); // months
   const [years, setYears] = useState<number | "">(5);

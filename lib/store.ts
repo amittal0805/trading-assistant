@@ -386,9 +386,9 @@ const seedPositions = (): Position[] =>
 const seedFunds = (): MutualFund[] =>
   (
     [
-      ["Invesco India Focused Fund", "Direct - Growth", 32.13, 1.32, 21760.999, 28.57, 621800, 699180],
-      ["Kotak Multicap Fund", "Direct - Growth", 21.8, 1.0, 26923.564, 20.51, 552336, 586933],
-      ["HDFC Small Cap Fund", "Direct - Growth", 163.69, 1.83, 3754.593, 150.6, 565451, 614626],
+      ["Invesco India Focused Fund", "Direct - Growth", 32.17, 0.31, 23473.922, 28.83, 676797, 755156],
+      ["Kotak Multicap Fund", "Direct - Growth", 21.92, 0.01, 26923.564, 20.51, 552336, 590272],
+      ["HDFC Small Cap Fund", "Direct - Growth", 163.99, -0.28, 3906.217, 151.16, 590450, 640584],
     ] as [string, string, number, number, number, number, number, number][]
   ).map(([name, category, nav, navChangePct, units, avgBuyNav, currentInvestment, currentValue]) => ({
     id: uid(),
@@ -721,7 +721,7 @@ export const useStore = create<Store>()(
         }
         return merged;
       },
-      version: 15,
+      version: 16,
       migrate: (persisted, version) => {
         const state = (persisted ?? {}) as Partial<Store>;
         // v2: ensure the seeded rotation baskets exist.
@@ -777,9 +777,13 @@ export const useStore = create<Store>()(
           state.holdings = seedHoldings();
           state.positions = seedPositions();
         }
-        // v11 & v14: refresh the seeded mutual funds to the latest snapshot
+        // v16: refresh holdings from the latest export (holdings-20.csv).
+        if (version < 16) {
+          state.holdings = seedHoldings();
+        }
+        // v11, v14 & v16: refresh the seeded mutual funds to the latest snapshot
         // values (match by name, keep id), keep any funds the user added.
-        if (version < 11 || version < 14) {
+        if (version < 11 || version < 14 || version < 16) {
           const funds = state.mutualFunds ?? [];
           const seeded = Object.fromEntries(seedFunds().map((f) => [f.name, f]));
           const names = new Set(funds.map((f) => f.name));

@@ -39,7 +39,7 @@ export default function Property() {
   const [extraPct, setExtraPct] = useState<number | "">(7); // stamp+reg+GST (hold only)
 
   // Corpus funding: pay installments out of this, keep the rest 30/70 FD/market
-  const [corpus, setCorpus] = useState<number | "">(25000000); // 2.5 Cr
+  const [corpus, setCorpus] = useState<number | "">(23300000); // 2.33 Cr
   const [fdPct, setFdPct] = useState<number | "">(30);
   const [fdRet, setFdRet] = useState<number | "">(6.5);
 
