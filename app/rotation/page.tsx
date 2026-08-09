@@ -11,35 +11,12 @@ import type { Indicator } from "@/app/api/indicators/route";
 import IntradayDrawer from "@/components/IntradayDrawer";
 import { analyzeIntraday } from "@/lib/intraday";
 import { sectorCall, SectorCall } from "@/lib/sectorAgent";
+import { SECTOR_INDEX, resolveIndex, sectorSignal, SECTOR_LEVEL_CLASS } from "@/lib/sectors";
 import { RefreshCw, Trash2, Plus, X, RotateCcw, Activity, Upload } from "lucide-react";
 
 type Quotes = Record<string, Quote>;
 type Indicators = Record<string, Indicator>;
 type SortKey = "name" | "price" | "pnl" | "value" | "weight" | "day";
-
-// Fallback benchmark index by sector, for baskets without an explicit indexSymbol.
-const SECTOR_INDEX: Record<string, string> = {
-  pharma: "NIFTY PHARMA",
-  "pharma & healthcare": "NIFTY PHARMA",
-  healthcare: "NIFTY HEALTHCARE INDEX",
-  energy: "NIFTY ENERGY",
-  "real estate": "NIFTY REALTY",
-  realty: "NIFTY REALTY",
-  bank: "NIFTY BANK",
-  banking: "NIFTY BANK",
-  "banking & financials": "NIFTY BANK",
-  financials: "NIFTY BANK",
-  it: "NIFTY IT",
-  auto: "NIFTY AUTO",
-  fmcg: "NIFTY FMCG",
-  metal: "NIFTY METAL",
-  metals: "NIFTY METAL",
-  microcap: "NIFTY MICROCAP 250",
-  "financial services": "NIFTY FINANCIAL SERVICES",
-};
-
-const resolveIndex = (s: Strategy) =>
-  s.indexSymbol || (s.sector ? SECTOR_INDEX[s.sector.trim().toLowerCase()] : undefined);
 
 // Re-entry plans from the Mentor's read (Auto Stars exit, 3-Aug-2026).
 // zone = pullback buy range, stop = invalidation, trigger = Zone B breakout add.
@@ -592,46 +569,19 @@ function SignalChip({ price, ind }: { price: number; ind?: Indicator }) {
   );
 }
 
-// Sector-level buy verdict from the live index: momentum (1M, 1Y) + 52-week
-// range position. Answers "is this sector a good buy right now?"
-function sectorSignal(idx: IndexRow): { label: string; tone: string; reason: string } | null {
-  const m1 = idx.pct30d;
-  const y1 = idx.pct365d;
-  if (!isFinite(m1) || !isFinite(y1)) return null;
-  const rangePct = idx.yearHigh > idx.yearLow ? ((idx.last - idx.yearLow) / (idx.yearHigh - idx.yearLow)) * 100 : null;
-  const cls = {
-    good: "bg-gain/15 text-gain border border-gain/30",
-    warn: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
-    bad: "bg-loss/15 text-loss border border-loss/30",
-  };
-  const rangeTxt = rangePct != null ? `, ${rangePct.toFixed(0)}% of 52-wk range` : "";
-  const reason = `1M ${fmtPct(m1)}, 1Y ${fmtPct(y1)}${rangeTxt}`;
-  if (y1 > 0 && m1 > 0) {
-    if (rangePct != null && rangePct >= 88)
-      return { label: "Buy on dips", tone: cls.warn, reason: `Strong sector but near its highs — ${reason}` };
-    return { label: "Good buy", tone: cls.good, reason: `Sector in an uptrend — ${reason}` };
-  }
-  if (y1 < 0 && m1 < 0) {
-    if (rangePct != null && rangePct <= 12)
-      return { label: "Oversold", tone: cls.warn, reason: `Beaten-down but oversold — ${reason}` };
-    return { label: "Avoid", tone: cls.bad, reason: `Sector in a downtrend — ${reason}` };
-  }
-  if (m1 > 0 && y1 <= 0) return { label: "Turning up", tone: cls.warn, reason: `Recovering — ${reason}` };
-  return { label: "Neutral", tone: cls.warn, reason: `Mixed momentum — ${reason}` };
-}
-
 function SectorVerdict({ idx, compact }: { idx: IndexRow; compact?: boolean }) {
   const s = sectorSignal(idx);
   if (!s) return null;
+  const tone = SECTOR_LEVEL_CLASS[s.level];
   if (compact)
     return (
-      <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded ${s.tone}`} title={s.reason}>
+      <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded ${tone}`} title={s.reason}>
         {s.label}
       </span>
     );
   return (
     <span className="inline-flex items-center gap-2 text-[11px]">
-      <span className={`px-2 py-0.5 rounded font-medium ${s.tone}`}>{s.label}</span>
+      <span className={`px-2 py-0.5 rounded font-medium ${tone}`}>{s.label}</span>
       <span className="text-muted">{s.reason}</span>
     </span>
   );

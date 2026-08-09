@@ -229,7 +229,7 @@ export default function TradingStyle() {
               label="Win rate"
               value={`${assessment.winRate.toFixed(0)}%`}
               pnl={assessment.winRate - 50}
-              sub={`${fmtMoney(assessment.expectancy)} / trade`}
+              sub={`${fmtMoney(assessment.expectancy)} / trade${assessment.reliableNet ? "" : " · active book"}`}
             />
             <StatCard
               label="Payoff ratio"
@@ -249,9 +249,9 @@ export default function TradingStyle() {
             </div>
           ) : (
             <div className="card mb-6 border-gain/30 bg-gain/5 text-sm text-zinc-300">
-              <span className="text-gain font-medium">Using your P&amp;L statement</span> for the realized figures
-              {accurate?.hasSplit ? " and the same-day vs held split" : ""}. Style classification (scalp / intraday /
-              swing) still comes from the tradebook&apos;s timestamps.
+              <span className="text-gain font-medium">Using your P&amp;L statement</span> for the realized total. Your
+              same-day (intraday &amp; scalp) P/L comes straight from the tradebook; swing P/L is the remainder, so the
+              three style cards reconcile to your Net P/L. Classification still comes from the tradebook&apos;s timestamps.
             </div>
           )}
 

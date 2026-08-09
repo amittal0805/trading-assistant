@@ -13,9 +13,7 @@ import {
   BookOpen,
   CandlestickChart,
   Repeat,
-  Eye,
   ClipboardList,
-  Landmark,
   BarChart3,
   Flame,
   Sparkles,
@@ -23,10 +21,12 @@ import {
   Sunrise,
   Target,
   Home,
+  ListChecks,
 } from "lucide-react";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/action", label: "Action Board", icon: ListChecks },
   { href: "/indices", label: "Indices", icon: BarChart3 },
   { href: "/active", label: "Most Active", icon: Flame },
   { href: "/intraday", label: "Intraday Assistant", icon: Calculator },
@@ -36,7 +36,6 @@ const nav = [
   { href: "/averaging", label: "Dip Buying", icon: TrendingDown },
   { href: "/scalping", label: "Scalping", icon: Scissors },
   { href: "/btst", label: "BTST", icon: Sunrise },
-  { href: "/watchlist", label: "Watchlist", icon: Eye },
   { href: "/review", label: "Review", icon: ClipboardList },
   { href: "/rotation", label: "Sectoral Rotation", icon: Repeat },
   { href: "/brokerage", label: "Brokerage", icon: Receipt },
@@ -44,7 +43,6 @@ const nav = [
   { href: "/style", label: "Trading Style", icon: Sparkles },
   { href: "/plan", label: "5-Year Plan", icon: Target },
   { href: "/property", label: "Property vs Stocks", icon: Home },
-  { href: "/tax", label: "Tax", icon: Landmark },
 ];
 
 export default function Sidebar() {
