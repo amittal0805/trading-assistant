@@ -28,6 +28,19 @@ function SectorTag({ names }: { names?: string[] }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface text-zinc-500 italic">Individual</span>;
 }
 
+type Held = { qty: number; avg: number; invested: number } | undefined;
+
+// Three cells: shares held, your average price, amount invested (or "—" if not held).
+function HeldCells({ h }: { h: Held }) {
+  return (
+    <>
+      <td className="td text-right font-mono text-xs">{h ? h.qty.toLocaleString("en-IN") : "—"}</td>
+      <td className="td text-right font-mono text-xs text-muted">{h ? h.avg.toFixed(2) : "—"}</td>
+      <td className="td text-right font-mono text-xs text-muted">{h ? `₹${Math.round(h.invested).toLocaleString("en-IN")}` : "—"}</td>
+    </>
+  );
+}
+
 function Def({ term, children, tone }: { term: string; children: React.ReactNode; tone?: string }) {
   return (
     <div className="text-xs leading-relaxed">
@@ -259,6 +272,23 @@ export default function ActionBoard() {
     [indicators]
   );
 
+  // What you currently hold, per symbol (holdings + open positions), so every
+  // action row can show shares held, your average price and the amount invested.
+  const heldBySymbol = useMemo(() => {
+    const m: Record<string, { qty: number; invested: number }> = {};
+    const add = (sym: string, qty: number, price: number) => {
+      if (qty <= 0) return;
+      const g = (m[sym] ??= { qty: 0, invested: 0 });
+      g.qty += qty;
+      g.invested += qty * price;
+    };
+    holdings.forEach((h) => currencyFor(h.exchange) === "INR" && add(h.symbol, h.qty, h.avgPrice));
+    positions.forEach((p) => p.status === "open" && currencyFor(p.exchange) === "INR" && add(p.symbol, p.qty, p.entryPrice));
+    const out: Record<string, { qty: number; avg: number; invested: number }> = {};
+    for (const [sym, g] of Object.entries(m)) out[sym] = { qty: g.qty, avg: g.qty > 0 ? g.invested / g.qty : 0, invested: g.invested };
+    return out;
+  }, [holdings, positions]);
+
   // --- SELL side: BTST overnight holds to sell tomorrow (with target prices) ---
   const btstSells = useMemo(() => {
     return positions
@@ -435,12 +465,13 @@ export default function ActionBoard() {
 
       {showHelp && <Legend />}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <StatCard label="To sell / trim" value={String(totalSells)} sub="BTST + sector calls" />
         <StatCard label="To buy / add" value={String(totalBuys)} sub="setups + sector calls" />
         <StatCard label="Sectors to favour" value={String(strongSectors)} sub={`of ${sectors.length} baskets`} />
         <StatCard label="Overnight holds" value={String(btstSells.length)} sub="positions to sell T+1" />
       </div>
+
 
       {universe.length === 0 && (
         <div className="card text-sm text-zinc-500 mb-6">
@@ -459,13 +490,14 @@ export default function ActionBoard() {
           <div className="px-4 pt-3 pb-1 text-[11px] text-zinc-500">
             BTST — your overnight holds to sell tomorrow. Sell price is a target sized by today&apos;s close; net is after delivery charges.
           </div>
-          <table className="w-full min-w-[860px]">
+          <table className="w-full min-w-[940px]">
             <thead>
               <tr>
                 <SortTh label="Stock" k="symbol" sort={sellSort} />
                 <SortTh label="Sector" k="sector" sort={sellSort} />
-                <SortTh label="Qty" k="qty" sort={sellSort} right />
+                <SortTh label="Shares held" k="qty" sort={sellSort} right />
                 <SortTh label="Your avg" k="avg" sort={sellSort} right />
+                <th className="th text-right">Amount</th>
                 <SortTh label="LTP" k="ltp" sort={sellSort} right />
                 <SortTh label="Sell at" k="target" sort={sellSort} right />
                 <SortTh label="Stop" k="stop" sort={sellSort} right />
@@ -491,6 +523,7 @@ export default function ActionBoard() {
                   <td className="td"><SectorTag names={basketBySymbol[r.symbol]} /></td>
                   <td className="td text-right font-mono text-xs">{fmtNum(r.qty, 0)}</td>
                   <td className="td text-right font-mono text-xs">{fmtNum(r.avg, 2)}</td>
+                  <td className="td text-right font-mono text-xs text-muted">{fmtMoney(r.qty * r.avg, "INR", 0)}</td>
                   <td className="td text-right font-mono text-xs text-muted">{isFinite(r.ltp) ? fmtNum(r.ltp, 2) : "—"}</td>
                   <td className="td text-right font-mono text-sm font-semibold text-accent">{fmtNum(r.plan.target, 2)}</td>
                   <td className="td text-right font-mono text-xs text-muted">{fmtNum(r.plan.stop, 2)}</td>
@@ -506,13 +539,16 @@ export default function ActionBoard() {
       {sectorSells.length > 0 && (
         <div className="card p-0 overflow-x-auto mb-6">
           <div className="px-4 pt-3 pb-1 text-[11px] text-zinc-500">Sectoral Rotation — stocks the desk agent wants to exit, trim or reduce.</div>
-          <table className="w-full min-w-[680px]">
+          <table className="w-full min-w-[880px]">
             <thead>
               <tr>
                 <SortTh label="Stock" k="symbol" sort={secSellSort} />
                 <SortTh label="Sector" k="sector" sort={secSellSort} />
                 <SortTh label="Action" k="action" sort={secSellSort} />
-                <SortTh label="Price" k="price" sort={secSellSort} right />
+                <th className="th text-right">Shares held</th>
+                <th className="th text-right">Your avg</th>
+                <th className="th text-right">Amount</th>
+                <SortTh label="Price now" k="price" sort={secSellSort} right />
                 <th className="th">Why / at what level</th>
               </tr>
             </thead>
@@ -526,6 +562,7 @@ export default function ActionBoard() {
                   </td>
                   <td className="td text-xs text-muted">{r.sector}</td>
                   <td className={`td text-xs font-medium ${ACTION_TONE[r.tone]}`}>{r.action}</td>
+                  <HeldCells h={heldBySymbol[r.symbol]} />
                   <td className="td text-right font-mono text-xs">{isFinite(r.price) ? fmtNum(r.price, 2) : "—"}</td>
                   <td className="td text-[11px] text-zinc-400 max-w-[360px]">{r.note}</td>
                 </tr>
@@ -550,13 +587,16 @@ export default function ActionBoard() {
           <div className="px-4 pt-3 pb-1 text-[11px] text-zinc-500">
             BTST setups for tomorrow — strong closes across your stocks. Buy on follow-through near the price, keep the stop tight (overnight gap risk).
           </div>
-          <table className="w-full min-w-[780px]">
+          <table className="w-full min-w-[940px]">
             <thead>
               <tr>
                 <SortTh label="Stock" k="symbol" sort={buySort} />
                 <SortTh label="Sector" k="sector" sort={buySort} />
+                <th className="th text-right">Shares held</th>
+                <th className="th text-right">Your avg</th>
+                <th className="th text-right">Amount</th>
                 <SortTh label="Score" k="score" sort={buySort} right />
-                <SortTh label="Price" k="price" sort={buySort} right />
+                <SortTh label="Price now" k="price" sort={buySort} right />
                 <th className="th text-right">Buy near</th>
                 <th className="th text-right">Stop</th>
                 <th className="th">Setup</th>
@@ -580,6 +620,7 @@ export default function ActionBoard() {
                       </span>
                     </td>
                     <td className="td"><SectorTag names={basketBySymbol[c.symbol]} /></td>
+                    <HeldCells h={heldBySymbol[c.symbol]} />
                     <td className="td text-right font-mono text-xs">{c.score.score}</td>
                     <td className="td text-right font-mono text-xs text-muted">{isFinite(c.price) ? fmtNum(c.price, 2) : "—"}</td>
                     <td className="td text-right font-mono text-sm font-semibold text-accent">{isFinite(c.price) ? fmtNum(c.price, 2) : "—"}</td>
@@ -596,13 +637,16 @@ export default function ActionBoard() {
       {sectorBuys.length > 0 && (
         <div className="card p-0 overflow-x-auto mb-6">
           <div className="px-4 pt-3 pb-1 text-[11px] text-zinc-500">Sectoral Rotation — stocks the desk agent wants to add to or re-enter.</div>
-          <table className="w-full min-w-[680px]">
+          <table className="w-full min-w-[880px]">
             <thead>
               <tr>
                 <SortTh label="Stock" k="symbol" sort={secBuySort} />
                 <SortTh label="Sector" k="sector" sort={secBuySort} />
                 <SortTh label="Action" k="action" sort={secBuySort} />
-                <SortTh label="Price" k="price" sort={secBuySort} right />
+                <th className="th text-right">Shares held</th>
+                <th className="th text-right">Your avg</th>
+                <th className="th text-right">Amount</th>
+                <SortTh label="Price now" k="price" sort={secBuySort} right />
                 <th className="th">Entry plan</th>
               </tr>
             </thead>
@@ -616,6 +660,7 @@ export default function ActionBoard() {
                   </td>
                   <td className="td text-xs text-muted">{r.sector}</td>
                   <td className={`td text-xs font-medium ${ACTION_TONE[r.tone]}`}>{r.action}</td>
+                  <HeldCells h={heldBySymbol[r.symbol]} />
                   <td className="td text-right font-mono text-xs">{isFinite(r.price) ? fmtNum(r.price, 2) : "—"}</td>
                   <td className="td text-[11px] text-zinc-400 max-w-[380px]">{r.note}</td>
                 </tr>
