@@ -252,6 +252,25 @@ export function combinedReturn(i: CombinedInput): CombinedResult {
   };
 }
 
+/**
+ * A milestone (slab-linked) schedule, e.g. 20:20:60 — booking now, a slab on the
+ * superstructure, the balance at possession. Milestones falling on the same year
+ * are combined.
+ */
+export function milestoneSchedule(
+  purchase: number,
+  milestones: { pct: number; year: number }[]
+): { year: number; amount: number }[] {
+  const byYear = new Map<number, number>();
+  for (const m of milestones) {
+    const amt = Math.round((purchase * m.pct) / 100 / 1000) * 1000;
+    byYear.set(m.year, (byYear.get(m.year) ?? 0) + amt);
+  }
+  return Array.from(byYear.entries())
+    .map(([year, amount]) => ({ year, amount }))
+    .sort((a, b) => a.year - b.year);
+}
+
 /** A construction-linked schedule paying a flat % of the base price each year. */
 export function linearSchedule(purchase: number, years: number, pctPerYear: number): { year: number; amount: number }[] {
   const rows: { year: number; amount: number }[] = [];

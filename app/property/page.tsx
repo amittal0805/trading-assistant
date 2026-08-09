@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { compareProperty, combinedReturn, linearSchedule } from "@/lib/property";
+import { compareProperty, combinedReturn, linearSchedule, milestoneSchedule } from "@/lib/property";
 import { fmtPct } from "@/lib/format";
 import { PageTitle, StatCard, Field, NumInput } from "@/components/ui";
 import { Home, LineChart, Scale, Info, Repeat, Wallet } from "lucide-react";
@@ -22,8 +22,15 @@ export default function Property() {
   const [rateExit, setRateExit] = useState<number | "">(20000);
   const [size, setSize] = useState<number | "">(2250);
   const [delivery, setDelivery] = useState<number | "">(7); // possession horizon
-  const [pctYear, setPctYear] = useState<number | "">(15); // % of price paid per year
   const [stockRet, setStockRet] = useState<number | "">(18);
+
+  // Payment plan: an even % per year, or slab-linked milestones (e.g. 20:20:60).
+  const [planMode, setPlanMode] = useState<"even" | "milestone">("milestone");
+  const [pctYear, setPctYear] = useState<number | "">(15); // even mode: % per year
+  const [bookingPct, setBookingPct] = useState<number | "">(20);
+  const [superPct, setSuperPct] = useState<number | "">(20);
+  const [possessionPct, setPossessionPct] = useState<number | "">(60);
+  const [superYear, setSuperYear] = useState<number | "">(3); // year the superstructure slab falls
 
   // Strategy
   const [flip, setFlip] = useState(true);
@@ -37,10 +44,17 @@ export default function Property() {
   const [fdRet, setFdRet] = useState<number | "">(6.5);
 
   const purchase = (Number(rateNow) || 0) * (Number(size) || 0);
-  const schedule = useMemo(
-    () => linearSchedule(purchase || 1, Math.max(1, Math.round(Number(delivery) || 7)), Number(pctYear) || 15),
-    [purchase, delivery, pctYear]
-  );
+  const deliveryYr = Math.max(1, Math.round(Number(delivery) || 7));
+  const schedule = useMemo(() => {
+    if (planMode === "milestone") {
+      return milestoneSchedule(purchase || 1, [
+        { pct: Number(bookingPct) || 0, year: 1 },
+        { pct: Number(superPct) || 0, year: Math.min(deliveryYr, Math.max(1, Number(superYear) || 3)) },
+        { pct: Number(possessionPct) || 0, year: deliveryYr },
+      ]);
+    }
+    return linearSchedule(purchase || 1, deliveryYr, Number(pctYear) || 15);
+  }, [planMode, purchase, deliveryYr, pctYear, bookingPct, superPct, possessionPct, superYear]);
 
   const res = useMemo(() => {
     if (!rateNow || !size || !delivery || stockRet === "") return null;
@@ -102,9 +116,36 @@ export default function Property() {
               <Field label="Size (sqft)"><NumInput value={size} onChange={setSize} /></Field>
             </div>
             <Field label="Rate at sale (₹/sqft)"><NumInput value={rateExit} onChange={setRateExit} /></Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Delivery (years)"><NumInput value={delivery} onChange={setDelivery} /></Field>
-              <Field label="Pay % / year"><NumInput value={pctYear} onChange={setPctYear} /></Field>
+            <Field label="Delivery (years)"><NumInput value={delivery} onChange={setDelivery} /></Field>
+
+            <div>
+              <label className="label">Payment plan</label>
+              <div className="inline-flex rounded-lg bg-surface p-0.5 w-full mb-2">
+                <button
+                  onClick={() => setPlanMode("milestone")}
+                  className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${planMode === "milestone" ? "bg-accent text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+                >
+                  Milestones (20:20:60)
+                </button>
+                <button
+                  onClick={() => setPlanMode("even")}
+                  className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${planMode === "even" ? "bg-accent text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+                >
+                  Even % / yr
+                </button>
+              </div>
+              {planMode === "milestone" ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field label="Booking %"><NumInput value={bookingPct} onChange={setBookingPct} /></Field>
+                    <Field label="Super %"><NumInput value={superPct} onChange={setSuperPct} /></Field>
+                    <Field label="Possess. %"><NumInput value={possessionPct} onChange={setPossessionPct} /></Field>
+                  </div>
+                  <Field label="Superstructure slab in year"><NumInput value={superYear} onChange={setSuperYear} /></Field>
+                </div>
+              ) : (
+                <Field label="Pay % / year"><NumInput value={pctYear} onChange={setPctYear} /></Field>
+              )}
             </div>
 
             {flip ? (
@@ -130,13 +171,21 @@ export default function Property() {
             </div>
 
             <div className="pt-1">
-              <label className="label">Payment plan ({Number(pctYear)}% / yr)</label>
+              <label className="label">Schedule (₹ per milestone)</label>
               <div className="space-y-1">
                 {schedule.map((s) => {
                   const paid = !flip || s.year <= (Number(sellYear) || Number(delivery));
+                  const tag =
+                    planMode === "milestone"
+                      ? s.year === 1
+                        ? "booking"
+                        : s.year === deliveryYr
+                        ? "possession"
+                        : "superstructure"
+                      : null;
                   return (
                     <div key={s.year} className={`flex items-center justify-between text-xs font-mono px-2 py-1 rounded ${paid ? "bg-surface" : "opacity-40 line-through"}`}>
-                      <span className="text-muted">Y{s.year}</span>
+                      <span className="text-muted">Y{s.year}{tag && <span className="ml-1 text-[10px] text-zinc-500">· {tag}</span>}</span>
                       <span>{inr(s.amount)}</span>
                     </div>
                   );
@@ -144,7 +193,8 @@ export default function Property() {
               </div>
               {flip && res && (
                 <p className="text-[11px] text-zinc-500 mt-2">
-                  You pay {inr(res.paidSoFar)} by year {horizon}; the buyer takes over {inr(res.outstanding)} outstanding.
+                  You pay {inr(res.paidSoFar)} by year {horizon}; the buyer takes over {inr(res.outstanding)} outstanding
+                  {planMode === "milestone" && (Number(sellYear) || Number(delivery)) < deliveryYr ? " — the 60% possession slab is never yours to pay." : "."}
                 </p>
               )}
             </div>
