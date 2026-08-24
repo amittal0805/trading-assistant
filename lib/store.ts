@@ -79,6 +79,22 @@ export interface WatchItem {
   exchange: Exchange;
 }
 
+// Daily price memory + a log of the board's own suggestions, so the Action
+// Board can learn from accumulated history and score how its calls worked out.
+export interface PricePoint {
+  d: string; // YYYY-MM-DD
+  p: number;
+}
+export interface SignalRecord {
+  id: string;
+  date: string; // YYYY-MM-DD the call was made
+  symbol: string;
+  kind: "buy" | "sell";
+  refPrice: number; // price when the call was logged
+  target?: number; // sell target, if any
+  source: string; // "BTST" or the sector name
+}
+
 export interface RotationStock {
   id: string;
   symbol: string; // NSE trading symbol, used for live quotes
@@ -137,6 +153,10 @@ interface Store {
   addFund: (f: Omit<MutualFund, "id">) => void;
   updateFund: (id: string, patch: Partial<MutualFund>) => void;
   removeFund: (id: string) => void;
+  priceHistory: Record<string, PricePoint[]>;
+  signalLog: SignalRecord[];
+  recordSnapshot: (entries: { symbol: string; price: number }[]) => void;
+  logSignals: (recs: Omit<SignalRecord, "id">[]) => void;
   strategies: Strategy[];
   restoreBaskets: () => void;
   setStrategyStocks: (id: string, stocks: Omit<RotationStock, "id">[]) => void;
@@ -475,6 +495,36 @@ export const useStore = create<Store>()(
       setVested: (v) => set({ vested: v }),
 
       mutualFunds: seedFunds(),
+      priceHistory: {},
+      signalLog: [],
+      recordSnapshot: (entries) =>
+        set((s) => {
+          const d = new Date().toISOString().slice(0, 10);
+          const ph: Record<string, PricePoint[]> = { ...s.priceHistory };
+          let changed = false;
+          for (const e of entries) {
+            if (!isFinite(e.price) || e.price <= 0) continue;
+            const arr = ph[e.symbol] ? [...ph[e.symbol]] : [];
+            const last = arr[arr.length - 1];
+            if (last && last.d === d) {
+              if (last.p === e.price) continue;
+              arr[arr.length - 1] = { d, p: e.price };
+            } else {
+              arr.push({ d, p: e.price });
+            }
+            ph[e.symbol] = arr.slice(-90); // ~3 months of daily memory
+            changed = true;
+          }
+          return changed ? { priceHistory: ph } : {};
+        }),
+      logSignals: (recs) =>
+        set((s) => {
+          const seen = new Set(s.signalLog.map((r) => `${r.date}|${r.symbol}|${r.kind}|${r.source}`));
+          const add = recs
+            .filter((r) => isFinite(r.refPrice) && !seen.has(`${r.date}|${r.symbol}|${r.kind}|${r.source}`))
+            .map((r) => ({ ...r, id: uid() }));
+          return add.length ? { signalLog: [...s.signalLog, ...add].slice(-3000) } : {};
+        }),
       addFund: (f) => set((s) => ({ mutualFunds: [...s.mutualFunds, { ...f, id: uid() }] })),
       updateFund: (id, patch) =>
         set((s) => ({ mutualFunds: s.mutualFunds.map((f) => (f.id === id ? { ...f, ...patch } : f)) })),

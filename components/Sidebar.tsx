@@ -23,6 +23,7 @@ import {
   Home,
   ListChecks,
   Goal,
+  Rss,
 } from "lucide-react";
 
 const nav = [
@@ -30,6 +31,7 @@ const nav = [
   { href: "/action", label: "Action Board", icon: ListChecks },
   { href: "/indices", label: "Indices", icon: BarChart3 },
   { href: "/active", label: "Most Active", icon: Flame },
+  { href: "/analysts", label: "Analyst Feed", icon: Rss },
   { href: "/intraday", label: "Intraday Assistant", icon: Calculator },
   { href: "/positions", label: "Positions", icon: Activity },
   { href: "/holdings", label: "Holdings", icon: Briefcase },

@@ -1,15 +1,39 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, Holding } from "@/lib/store";
 import { Exchange, Broker, netPnl } from "@/lib/charges";
 import { fmtMoney, fmtNum, fmtPct, pnlClass, currencyFor } from "@/lib/format";
 import { PageTitle, Field, NumInput, Empty } from "@/components/ui";
-import { Trash2, RefreshCw, Upload, HandCoins, X } from "lucide-react";
+import { Trash2, RefreshCw, Upload, HandCoins, X, Activity } from "lucide-react";
 import { fetchQuotes, yahooSymbol } from "@/lib/quotes";
 import { parseKiteRows } from "@/lib/kite";
+import type { Indicator } from "@/app/api/indicators/route";
 
 type SortKey = "symbol" | "qty" | "avgPrice" | "currentPrice" | "invested" | "value" | "pl" | "plPct" | "dayPl" | "dayPct";
+
+// Buy/sell signal from price vs the 50 & 200-day moving averages and RSI.
+// Strong Buy/Sell = trend and DMA alignment agree (golden/death cross);
+// Overbought/Oversold flag stretched RSI; Neutral = price between the DMAs.
+function dmaSignal(price: number, sma50: number | null, sma200: number | null, rsi: number | null) {
+  if (sma50 == null || sma200 == null || !isFinite(price)) return null;
+  const above50 = price >= sma50;
+  const above200 = price >= sma200;
+  const cls = {
+    good: "bg-gain/15 text-gain",
+    warn: "bg-amber-500/15 text-amber-400",
+    bad: "bg-loss/15 text-loss",
+  };
+  if (above50 && above200) {
+    if (rsi != null && rsi >= 75) return { label: "Overbought", cls: cls.warn };
+    return sma50 >= sma200 ? { label: "Strong Buy", cls: cls.good } : { label: "Buy", cls: cls.good };
+  }
+  if (!above50 && !above200) {
+    if (rsi != null && rsi <= 30) return { label: "Oversold", cls: cls.warn };
+    return sma50 < sma200 ? { label: "Strong Sell", cls: cls.bad } : { label: "Sell", cls: cls.bad };
+  }
+  return { label: "Neutral", cls: cls.warn };
+}
 
 export default function Holdings() {
   const [mounted, setMounted] = useState(false);
@@ -36,6 +60,9 @@ export default function Holdings() {
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [market, setMarket] = useState<"IN" | "US">("IN");
+
+  const [ind, setInd] = useState<Record<string, Indicator>>({});
+  const [indLoading, setIndLoading] = useState(false);
 
   const [symbol, setSymbol] = useState("");
   const [exchange, setExchange] = useState<Exchange>("NSE");
@@ -70,6 +97,26 @@ export default function Holdings() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings, sortKey, sortDir, market]);
+
+  const loadIndicators = useCallback(async () => {
+    const syms = Array.from(new Set(holdings.filter(inTab).map((h) => yahooSymbol(h.symbol, h.exchange))));
+    if (syms.length === 0) return;
+    setIndLoading(true);
+    try {
+      const r = await fetch(`/api/indicators?symbols=${encodeURIComponent(syms.join(","))}`, { cache: "no-store" });
+      const j = await r.json();
+      if (j?.data) setInd((prev) => ({ ...prev, ...(j.data as Record<string, Indicator>) }));
+    } catch {
+      /* leave blank */
+    } finally {
+      setIndLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdings, market]);
+
+  useEffect(() => {
+    if (mounted) loadIndicators();
+  }, [mounted, loadIndicators]);
 
   if (!mounted) return null;
 
@@ -194,6 +241,10 @@ export default function Holdings() {
             <button className="btn-ghost !py-1.5 text-xs" onClick={refreshPrices} disabled={refreshing}>
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
               {refreshing ? "Fetching…" : "Refresh Prices"}
+            </button>
+            <button className="btn-ghost !py-1.5 text-xs" onClick={loadIndicators} disabled={indLoading} title="Reload 50/200 DMA & RSI signals">
+              <Activity className={`w-3.5 h-3.5 ${indLoading ? "animate-pulse" : ""}`} />
+              {indLoading ? "Loading…" : "DMA signals"}
             </button>
           </div>
           {(importMsg || lastRefresh) && (
@@ -340,7 +391,7 @@ export default function Holdings() {
         />
       ) : (
         <div className="card overflow-x-auto p-0">
-          <table className="w-full min-w-[720px]">
+          <table className="w-full min-w-[1000px]">
             <thead>
               <tr>
                 <Th k="symbol" label="Stock" />
@@ -348,6 +399,9 @@ export default function Holdings() {
                 <Th k="qty" label="Qty" />
                 <Th k="avgPrice" label="Avg" />
                 <Th k="currentPrice" label="Current" />
+                <th className="th text-right">50 DMA</th>
+                <th className="th text-right">200 DMA</th>
+                <th className="th">Signal</th>
                 <Th k="invested" label="Invested" />
                 <Th k="value" label="Value" />
                 <Th k="pl" label="P/L" />
@@ -364,6 +418,8 @@ export default function Holdings() {
                 const inv = h.qty * h.avgPrice;
                 const val = h.qty * h.currentPrice;
                 const pl = val - inv;
+                const i = ind[yahooSymbol(h.symbol, h.exchange)];
+                const sig = i ? dmaSignal(h.currentPrice, i.sma50, i.sma200, i.rsi) : null;
                 return (
                   <tr key={h.id} className="hover:bg-surface/50">
                     <td className="td font-medium">{h.symbol}</td>
@@ -377,6 +433,11 @@ export default function Holdings() {
                         value={h.currentPrice}
                         onChange={(e) => updateHolding(h.id, { currentPrice: Number(e.target.value) })}
                       />
+                    </td>
+                    <td className="td text-right font-mono text-xs text-muted">{i?.sma50 != null ? fmtNum(i.sma50, 2) : indLoading ? "…" : "—"}</td>
+                    <td className="td text-right font-mono text-xs text-muted">{i?.sma200 != null ? fmtNum(i.sma200, 2) : indLoading ? "…" : "—"}</td>
+                    <td className="td">
+                      {sig ? <span className={`text-[10px] px-1.5 py-0.5 rounded ${sig.cls}`}>{sig.label}</span> : <span className="text-zinc-600 text-xs">—</span>}
                     </td>
                     <td className="td font-mono">{fmtMoney(inv, ccy)}</td>
                     <td className="td font-mono">{fmtMoney(val, ccy)}</td>
@@ -414,7 +475,7 @@ export default function Holdings() {
                 );
                 return (
                   <tr className="bg-surface/60">
-                    <td className="td font-medium" colSpan={5}>Total ({sorted.length})</td>
+                    <td className="td font-medium" colSpan={8}>Total ({sorted.length})</td>
                     <td className="td font-mono font-semibold">{fmtMoney(inv, ccy)}</td>
                     <td className="td font-mono font-semibold">{fmtMoney(val, ccy)}</td>
                     <td className={`td font-mono font-semibold ${pnlClass(val - inv)}`}>{fmtMoney(val - inv, ccy)}</td>

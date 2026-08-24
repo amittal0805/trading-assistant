@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { yahooSymbol } from "@/lib/quotes";
 import { sectorCall, SectorCall } from "@/lib/sectorAgent";
 import { resolveIndex, sectorSignal, SECTOR_LEVEL_CLASS, SectorSignal } from "@/lib/sectors";
 import { btstSellPlan, btstScore, strengthFrom } from "@/lib/btst";
+import { marketRead, scoreSignals } from "@/lib/intel";
 import type { Indicator } from "@/app/api/indicators/route";
 import type { IndexRow } from "@/app/api/indices/route";
 import { currencyFor, fmtMoney, fmtNum, fmtPct, pnlClass } from "@/lib/format";
 import { Broker, Exchange } from "@/lib/charges";
-import { PageTitle, StatCard } from "@/components/ui";
+import { PageTitle, StatCard, NumInput } from "@/components/ui";
 import IntradayDrawer from "@/components/IntradayDrawer";
-import { RefreshCw, ArrowDownRight, ArrowUpRight, Layers, Info, HelpCircle } from "lucide-react";
+import { RefreshCw, ArrowDownRight, ArrowUpRight, Layers, Info, HelpCircle, Brain, Zap, Coins } from "lucide-react";
 
 type Indicators = Record<string, Indicator>;
 
@@ -193,13 +194,14 @@ function SortTh({
 export default function ActionBoard() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const { holdings, positions, strategies } = useStore();
+  const { holdings, positions, strategies, priceHistory, signalLog, recordSnapshot, logSignals } = useStore();
 
   const [indicators, setIndicators] = useState<Indicators>({});
   const [indices, setIndices] = useState<IndexRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [stock, setStock] = useState<{ symbol: string; name?: string } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [dayBudget, setDayBudget] = useState<number | "">(100000); // amount to deploy today
 
   // Live held quantity and booked P&L, mirrored from the book (for the sector agent).
   const heldNow = useMemo(() => {
@@ -317,10 +319,14 @@ export default function ActionBoard() {
       let inv = 0;
       let val = 0;
       const stocks = st.stocks.map((x) => {
-        const price = priceOf(x.symbol, x.exchange, x.lastPrice ?? x.addedPrice);
-        const held = x.heldQty ?? x.qty;
-        if (isFinite(price) && x.addedPrice) {
-          inv += held * x.addedPrice;
+        // Use LIVE holdings (updated on the Holdings page) rather than the static
+        // basket definition, so this board reflects buys/sells the moment they land.
+        const live = heldBySymbol[x.symbol];
+        const price = priceOf(x.symbol, x.exchange, live?.avg ?? x.addedPrice ?? x.lastPrice);
+        const held = live?.qty ?? 0;
+        const avg = live?.avg ?? x.addedPrice ?? price;
+        if (isFinite(price) && avg) {
+          inv += held * avg;
           val += held * price;
         }
         const ind = indicators[yahooSymbol(x.symbol, x.exchange)];
@@ -328,7 +334,7 @@ export default function ActionBoard() {
           symbol: x.symbol,
           name: x.name,
           heldQty: held,
-          avg: x.addedPrice ?? price,
+          avg,
           price,
           dayPct: null,
           breakoutScore: ind?.breakout?.score ?? null,
@@ -352,7 +358,7 @@ export default function ActionBoard() {
       });
       return { id: st.id, name: st.name, verdict, call };
     });
-  }, [strategies, indexBySymbol, indicators, priceOf, heldNow, realizedNow]);
+  }, [strategies, indexBySymbol, indicators, priceOf, heldNow, realizedNow, heldBySymbol]);
 
   // Sector-agent actions, flattened and split into sell-side / buy-side.
   const priceLookup = useCallback(
@@ -396,6 +402,67 @@ export default function ActionBoard() {
       .sort((a, b) => b.score.score - a.score.score)
       .slice(0, 10);
   }, [universe, indicators]);
+
+  // --- Learning: once prices arrive, snapshot them and log today's calls so
+  // the board accumulates a memory and can score how its calls worked out. ---
+  useEffect(() => {
+    if (!mounted || Object.keys(indicators).length === 0) return;
+    const entries = universe
+      .map((u) => ({ symbol: u.symbol, price: priceOf(u.symbol, u.exchange) }))
+      .filter((e) => isFinite(e.price));
+    if (entries.length) recordSnapshot(entries);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const recs = [
+      ...btstBuys.map((c) => ({ date: today, symbol: c.symbol, kind: "buy" as const, refPrice: c.price, source: "BTST" })),
+      ...sectorBuys.map((r) => ({ date: today, symbol: r.symbol, kind: "buy" as const, refPrice: r.price, source: r.sector })),
+      ...btstSells.map((r) => ({ date: today, symbol: r.symbol, kind: "sell" as const, refPrice: isFinite(r.ltp) ? r.ltp : r.avg, target: r.plan.target, source: "BTST" })),
+      ...sectorSells.map((r) => ({ date: today, symbol: r.symbol, kind: "sell" as const, refPrice: r.price, source: r.sector })),
+    ].filter((r) => isFinite(r.refPrice));
+    if (recs.length) logSignals(recs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicators, mounted]);
+
+  const read = useMemo(() => marketRead(priceHistory, universe.map((u) => u.symbol)), [priceHistory, universe]);
+  const scorecard = useMemo(() => scoreSignals(signalLog, priceHistory), [signalLog, priceHistory]);
+
+  // Proportional top-up: split today's budget across sectors by current invested
+  // weight, then across each sector's held stocks, and floor to whole shares.
+  const topup = useMemo(() => {
+    const budget = Number(dayBudget) || 0;
+    const seen = new Set<string>();
+    const sectors = strategies
+      .map((st) => {
+        const stocks = st.stocks
+          .map((x) => {
+            const h = heldBySymbol[x.symbol];
+            if (!h || h.qty <= 0 || seen.has(x.symbol)) return null;
+            seen.add(x.symbol);
+            return { symbol: x.symbol, invested: h.invested, price: priceOf(x.symbol, x.exchange, h.avg) };
+          })
+          .filter((s): s is { symbol: string; invested: number; price: number } => s !== null);
+        const invested = stocks.reduce((a, s) => a + s.invested, 0);
+        return { name: st.name, invested, stocks };
+      })
+      .filter((s) => s.invested > 0);
+
+    const total = sectors.reduce((a, s) => a + s.invested, 0);
+    let used = 0;
+    let shares = 0;
+    const rows = sectors.map((s) => {
+      const sectorAlloc = total > 0 ? (budget * s.invested) / total : 0;
+      const stocks = s.stocks.map((st) => {
+        const alloc = s.invested > 0 ? (sectorAlloc * st.invested) / s.invested : 0;
+        const qty = st.price > 0 ? Math.floor(alloc / st.price) : 0;
+        const spend = qty * st.price;
+        used += spend;
+        shares += qty;
+        return { ...st, alloc, qty, spend };
+      });
+      return { name: s.name, invested: s.invested, weightPct: total > 0 ? (s.invested / total) * 100 : 0, sectorAlloc, stocks };
+    });
+    return { total, rows, used, shares, leftover: budget - used };
+  }, [dayBudget, strategies, heldBySymbol, priceOf]);
 
   // Sort state for each of the four tables.
   const sellSort = useSort("net");
@@ -464,6 +531,73 @@ export default function ActionBoard() {
       </div>
 
       {showHelp && <Legend />}
+
+      {/* Board intelligence — learns from accumulated daily price memory */}
+      <div className="card mb-6 border-accent/20 bg-accent/5">
+        <div className="flex items-center gap-2 mb-2">
+          <Brain className="w-4 h-4 text-accent" />
+          <h2 className="text-sm font-medium">Today&apos;s read</h2>
+          <span className="ml-auto text-[11px] text-muted">learning from {read.days} day{read.days === 1 ? "" : "s"} of price memory</span>
+        </div>
+        <div className="space-y-1">
+          {read.lines.map((l, i) => (
+            <p key={i} className="text-sm text-zinc-300">{l}</p>
+          ))}
+        </div>
+
+        {/* How the board's own calls have worked out */}
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <div className="rounded-lg bg-surface p-2.5">
+            <div className="text-[11px] text-muted">Buy calls</div>
+            <div className={`text-lg font-semibold font-mono ${scorecard.buys.n ? pnlClass(scorecard.buys.winRate - 50) : "text-zinc-500"}`}>
+              {scorecard.buys.n ? `${scorecard.buys.winRate.toFixed(0)}%` : "—"}
+            </div>
+            <div className="text-[10px] text-zinc-500">{scorecard.buys.wins}/{scorecard.buys.n} rose next day</div>
+          </div>
+          <div className="rounded-lg bg-surface p-2.5">
+            <div className="text-[11px] text-muted">Sell calls</div>
+            <div className={`text-lg font-semibold font-mono ${scorecard.sells.n ? pnlClass(scorecard.sells.winRate - 50) : "text-zinc-500"}`}>
+              {scorecard.sells.n ? `${scorecard.sells.winRate.toFixed(0)}%` : "—"}
+            </div>
+            <div className="text-[10px] text-zinc-500">{scorecard.sells.wins}/{scorecard.sells.n} worked out</div>
+          </div>
+          <div className="rounded-lg bg-surface p-2.5">
+            <div className="text-[11px] text-muted">Overall</div>
+            <div className={`text-lg font-semibold font-mono ${scorecard.overall.n ? pnlClass(scorecard.overall.winRate - 50) : "text-zinc-500"}`}>
+              {scorecard.overall.n ? `${scorecard.overall.winRate.toFixed(0)}%` : "—"}
+            </div>
+            <div className="text-[10px] text-zinc-500">{scorecard.resolved} scored · {scorecard.pending} pending</div>
+          </div>
+        </div>
+
+        {/* Unusual moves vs each stock's own history */}
+        {read.flags.length > 0 && (
+          <div className="mt-3">
+            <div className="flex items-center gap-1.5 text-[11px] text-muted mb-1.5"><Zap className="w-3 h-3 text-amber-400" /> Unusual moves today</div>
+            <div className="flex flex-wrap gap-2">
+              {read.flags.map((f) => (
+                <button
+                  key={f.symbol}
+                  onClick={() => setStock({ symbol: f.symbol })}
+                  className="text-left px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-xs hover:border-accent transition-colors"
+                  title={f.reason}
+                >
+                  <span className="font-medium text-zinc-100">{f.symbol}</span>
+                  <span className={`ml-1.5 font-mono ${pnlClass(f.pct)}`}>{fmtPct(f.pct)}</span>
+                  <span className="block text-[10px] text-muted mt-0.5 max-w-[200px] truncate">{f.reason}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[11px] text-zinc-500 mt-3">
+          {scorecard.overall.n < 15
+            ? "Win-rates are on a small sample so far — they firm up as more calls resolve over the coming days. "
+            : ""}
+          This is a descriptive read of your own price history and past calls, not a prediction. Not investment advice.
+        </p>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <StatCard label="To sell / trim" value={String(totalSells)} sub="BTST + sector calls" />
@@ -672,6 +806,75 @@ export default function ActionBoard() {
 
       {totalBuys === 0 && universe.length > 0 && (
         <div className="card text-sm text-zinc-500 mb-6">No fresh buy setups right now — rescan after the market close.</div>
+      )}
+
+      {/* PROPORTIONAL TOP-UP — deploy today's amount by sector weight */}
+      <div className="flex items-center gap-2 mb-3">
+        <Coins className="w-5 h-5 text-accent" />
+        <h2 className="text-lg font-semibold tracking-tight">Deploy today — proportional top-up</h2>
+      </div>
+      {topup.rows.length === 0 ? (
+        <div className="card text-sm text-zinc-500 mb-6">
+          No sector holdings to scale yet — add stocks to your rotation baskets (and hold some) and this will split a daily amount across them.
+        </div>
+      ) : (
+        <div className="card p-0 overflow-hidden mb-6">
+          <div className="px-4 pt-4 flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-zinc-300">Amount to deploy today</span>
+            <span className="w-32"><NumInput value={dayBudget} onChange={setDayBudget} /></span>
+            <span className="text-[11px] text-muted">split by your current sector weights, then by each stock&apos;s weight — floored to whole shares.</span>
+          </div>
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full min-w-[720px]">
+              <thead>
+                <tr>
+                  <th className="th">Sector / stock</th>
+                  <th className="th text-right">Current weight</th>
+                  <th className="th text-right">Price</th>
+                  <th className="th text-right">Allocate</th>
+                  <th className="th text-right">Qty to buy</th>
+                  <th className="th text-right">Spend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topup.rows.map((s) => (
+                  <Fragment key={s.name}>
+                    <tr className="bg-surface/40">
+                      <td className="td font-medium text-xs text-accent">{s.name}</td>
+                      <td className="td text-right font-mono text-xs">{s.weightPct.toFixed(0)}%</td>
+                      <td className="td"></td>
+                      <td className="td text-right font-mono text-xs text-muted">{fmtMoney(s.sectorAlloc, "INR", 0)}</td>
+                      <td className="td"></td>
+                      <td className="td"></td>
+                    </tr>
+                    {s.stocks.map((st) => (
+                      <tr key={st.symbol}>
+                        <td className="td pl-6">
+                          <button className="text-sm text-accent hover:underline" onClick={() => setStock({ symbol: st.symbol })}>{st.symbol}</button>
+                        </td>
+                        <td className="td text-right font-mono text-[11px] text-zinc-500">{topup.total > 0 ? ((st.invested / topup.total) * 100).toFixed(1) : 0}%</td>
+                        <td className="td text-right font-mono text-xs">{isFinite(st.price) ? fmtNum(st.price, 2) : "—"}</td>
+                        <td className="td text-right font-mono text-xs text-muted">{fmtMoney(st.alloc, "INR", 0)}</td>
+                        <td className="td text-right font-mono text-sm font-semibold text-accent">{st.qty > 0 ? fmtNum(st.qty, 0) : "—"}</td>
+                        <td className="td text-right font-mono text-xs">{st.spend > 0 ? fmtMoney(st.spend, "INR", 0) : "—"}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-border">
+                  <td className="td text-xs font-medium" colSpan={4}>Total · {fmtNum(topup.shares, 0)} shares</td>
+                  <td className="td"></td>
+                  <td className="td text-right font-mono text-xs font-semibold">{fmtMoney(topup.used, "INR", 0)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="px-4 py-3 text-[11px] text-zinc-500 border-t border-border">
+            Deploys {fmtMoney(topup.used, "INR", 0)} of {fmtMoney(Number(dayBudget) || 0, "INR", 0)} — {fmtMoney(topup.leftover, "INR", 0)} left over from rounding to whole shares. Proportions mirror what you already hold in each basket; prices are the latest close.
+          </div>
+        </div>
       )}
 
       {/* SECTOR STANCE */}

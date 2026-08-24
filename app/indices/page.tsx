@@ -5,7 +5,12 @@ import { PageTitle, StatCard } from "@/components/ui";
 import { fmtNum, fmtPct, pnlClass } from "@/lib/format";
 import type { IndexRow } from "@/app/api/indices/route";
 import ConstituentsDrawer from "@/components/ConstituentsDrawer";
-import { RefreshCw, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight } from "lucide-react";
+import { SECTOR_OUTLOOK, STANCE_TONE } from "@/lib/sectorOutlook";
+import { RefreshCw, ArrowUp, ArrowDown, TrendingUp, TrendingDown, ChevronRight, Compass } from "lucide-react";
+
+function niceDate(d: string) {
+  return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+}
 
 interface IndicesResponse {
   rows: IndexRow[];
@@ -190,6 +195,50 @@ export default function Indices() {
           )}
         </div>
       )}
+
+      {/* News-based sectoral rotation outlook (dated snapshot) */}
+      <div className="card mb-6 border-accent/20 bg-accent/5">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <Compass className="w-4 h-4 text-accent" />
+          <h2 className="text-sm font-medium">Sectoral rotation outlook</h2>
+          <span className="text-[11px] text-muted">{niceDate(SECTOR_OUTLOOK.date)}</span>
+          <span className="ml-auto text-[10px] text-zinc-500">{SECTOR_OUTLOOK.asOf}</span>
+        </div>
+        <p className="text-sm text-zinc-200 leading-relaxed mb-3">{SECTOR_OUTLOOK.headline}</p>
+
+        <div className="grid md:grid-cols-2 gap-x-6 gap-y-1.5 mb-3">
+          {SECTOR_OUTLOOK.drivers.map((d, i) => (
+            <p key={i} className="text-xs text-zinc-400 flex gap-2">
+              <span className="text-accent mt-0.5">•</span>
+              <span>{d}</span>
+            </p>
+          ))}
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-2 mb-3">
+          {SECTOR_OUTLOOK.views.map((v) => (
+            <div key={v.sector} className="flex items-start gap-2 rounded-lg bg-surface/50 px-2.5 py-2">
+              <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${STANCE_TONE[v.stance]}`}>{v.stance}</span>
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-zinc-200">{v.sector}</div>
+                <div className="text-[11px] text-zinc-400">{v.note}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border/60 pt-2">
+          <span className="text-[10px] text-zinc-500">Sources:</span>
+          {SECTOR_OUTLOOK.sources.map((s, i) => (
+            <a key={i} href={s.url} target="_blank" rel="noreferrer" className="text-[10px] text-accent hover:underline truncate max-w-[240px]">
+              {s.title}
+            </a>
+          ))}
+        </div>
+        <p className="text-[10px] text-zinc-500 mt-2">
+          A dated news snapshot compiled by hand — it doesn&apos;t auto-update. Descriptive read of public news and index momentum, not investment advice.
+        </p>
+      </div>
 
       {data && data.rows.length > 0 && (
         <div className="grid md:grid-cols-2 gap-4 mb-6">
